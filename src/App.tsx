@@ -1,0 +1,115 @@
+import { useState } from 'react'
+import './App.css'
+import { exercises } from './domain/exercises'
+import { sampleWorkouts } from './domain/seed'
+import { workoutTemplates } from './domain/templates'
+import { loadPlans, loadSavedTemplates, loadWorkouts, savePlan, saveWorkout, toggleSavedTemplate } from './domain/storage'
+import type { LoggedSet, Workout, WorkoutTemplate } from './domain/models'
+
+type View = 'today' | 'history' | 'exercises' | 'plans'
+
+function App() {
+  const [view, setView] = useState<View>('today')
+  const [workouts, setWorkouts] = useState<Workout[]>(() => {
+    const saved = loadWorkouts()
+    return saved.length > 0 ? saved : sampleWorkouts
+  })
+  const [selectedExerciseId, setSelectedExerciseId] = useState(exercises[0].id)
+  const [draftSets, setDraftSets] = useState<LoggedSet[]>([])
+  const [weight, setWeight] = useState('70')
+  const [reps, setReps] = useState('8')
+  const [showLogger, setShowLogger] = useState(false)
+  const [activePlan, setActivePlan] = useState<WorkoutTemplate>(workoutTemplates[0])
+  const [plans, setPlans] = useState<WorkoutTemplate[]>(() => loadPlans())
+
+  function addSet() {
+    const parsedWeight = Number(weight)
+    const parsedReps = Number(reps)
+    if (!Number.isFinite(parsedWeight) || !Number.isFinite(parsedReps) || parsedReps <= 0) return
+    setDraftSets((current) => [...current, { id: crypto.randomUUID(), exerciseId: selectedExerciseId, weight: parsedWeight, reps: parsedReps }])
+  }
+
+  function finishWorkout() {
+    if (draftSets.length === 0) return
+    const workout: Workout = { id: crypto.randomUUID(), date: new Date().toISOString().slice(0, 10), title: activePlan.name, sets: draftSets }
+    setWorkouts(saveWorkout(workout, workouts)); setDraftSets([]); setShowLogger(false); setView('history')
+  }
+
+  function startPlan(plan: WorkoutTemplate) {
+    setActivePlan(plan); setSelectedExerciseId(plan.exerciseIds[0] ?? exercises[0].id); setDraftSets([]); setShowLogger(true)
+  }
+
+  return <div className="app-shell">
+    <header className="topbar"><a className="brand" href="#top" onClick={() => setView('today')}><span className="brand-mark">B</span><span><strong>Bobby</strong><small>training log</small></span></a><nav className="main-nav" aria-label="Main navigation">{(['today', 'history', 'exercises', 'plans'] as View[]).map((item) => <button key={item} className={view === item ? 'nav-link active' : 'nav-link'} onClick={() => setView(item)}>{item === 'today' ? 'Today' : item === 'history' ? 'History' : item === 'exercises' ? 'Exercises' : 'Plans'}</button>)}</nav><div className="profile-chip"><span className="profile-dot">A</span><span>Alex</span></div></header>
+    <main id="top">{view === 'today' && <TodayView plan={activePlan} workouts={workouts} onLog={() => startPlan(activePlan)} />}{view === 'history' && <HistoryView workouts={workouts} />}{view === 'exercises' && <ExercisesView />}{view === 'plans' && <PlansView plans={plans} onSave={(plan) => setPlans(savePlan(plan))} onStart={startPlan} />}</main>
+    {showLogger && <div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowLogger(false)}><section className="modal" aria-labelledby="logger-title"><div className="modal-heading"><div><p className="eyebrow">{activePlan.name}</p><h2 id="logger-title">Log workout</h2></div><button className="close-button" onClick={() => setShowLogger(false)} aria-label="Close logger">×</button></div><div className="plan-preview">{activePlan.exerciseIds.map((id, index) => <span key={id} className={id === selectedExerciseId ? 'plan-exercise active' : 'plan-exercise'}>{index + 1}. {exercises.find((exercise) => exercise.id === id)?.name}</span>)}</div><label>Exercise<select value={selectedExerciseId} onChange={(event) => setSelectedExerciseId(event.target.value)}>{activePlan.exerciseIds.map((id) => { const exercise = exercises.find((item) => item.id === id); return exercise ? <option key={exercise.id} value={exercise.id}>{exercise.name}</option> : null })}</select></label><div className="input-row"><label>Weight<input inputMode="decimal" value={weight} onChange={(event) => setWeight(event.target.value)} /><span className="input-unit">lb</span></label><label>Reps<input inputMode="numeric" value={reps} onChange={(event) => setReps(event.target.value)} /></label></div><button className="secondary-button full" onClick={addSet}>＋ Add set</button><div className="draft-list">{draftSets.length === 0 ? <p className="empty-state">Log sets as you move through the plan.</p> : draftSets.map((set, index) => <div className="draft-set" key={set.id}><span>{exercises.find((exercise) => exercise.id === set.exerciseId)?.name} · Set {index + 1}</span><strong>{set.weight} lb × {set.reps}</strong><button onClick={() => setDraftSets((current) => current.filter((item) => item.id !== set.id))}>Remove</button></div>)}</div><button className="primary-button full" disabled={draftSets.length === 0} onClick={finishWorkout}>Finish workout</button><p className="timing-note">Timing is optional. You can add set and rest tracking later without changing this flow.</p></section></div>}
+  </div>
+}
+
+function TodayView({ plan, workouts, onLog }: { plan: WorkoutTemplate; workouts: Workout[]; onLog: () => void }) {
+  const lastWorkout = [...workouts].sort((a, b) => b.date.localeCompare(a.date))[0]
+  return <><section className="page-intro"><div><p className="eyebrow">Tuesday, September 8, 2026</p><h1>Make today count.</h1><p className="lede">A complete session, grounded in what you actually did.</p></div><button className="primary-button" onClick={onLog}>＋ Start workout</button></section><section className="dashboard-grid"><div className="recommendation-panel"><div className="panel-topline"><span className="status-dot"></span><span>Recommended workout</span><span className="confidence">Based on your history</span></div><div className="recommendation-main"><div><p className="eyebrow warm">NEXT SESSION</p><h2>{plan.name}</h2><p className="recommendation-sub">{plan.focus} · {plan.exerciseIds.length} exercises</p></div><div className="weight-callout"><strong>{plan.exerciseIds.length}</strong><span>movements</span></div></div><div className="plan-exercise-list">{plan.exerciseIds.map((id, index) => { const exercise = exercises.find((item) => item.id === id); return exercise ? <div className="plan-row" key={id}><span>{String(index + 1).padStart(2, '0')}</span><strong>{exercise.name}</strong><small>{exercise.defaultSets} × {exercise.repRange.min}–{exercise.repRange.max}</small></div> : null })}</div><div className="why-box"><div className="why-title"><span className="why-icon">?</span><strong>Why this recommendation?</strong></div><p><span>↳</span>{plan.description}</p><p><span>↳</span>Your last logged work informs progression inside each movement.</p><p><span>↳</span>Keep the session flexible if recovery or equipment changes.</p></div><div className="recommendation-actions"><button className="primary-button" onClick={onLog}>Start {plan.name}</button><button className="text-button">Change plan →</button></div></div><aside className="side-column"><div className="mini-panel"><div className="panel-title"><span>Recent momentum</span><span className="trend-up">↗ +12%</span></div><div className="metric-number">3 <span>sessions</span></div><div className="mini-bars"><i style={{ height: '38%' }}></i><i style={{ height: '58%' }}></i><i style={{ height: '46%' }}></i><i style={{ height: '80%' }}></i><i style={{ height: '68%' }}></i><i className="today-bar" style={{ height: '92%' }}></i></div><div className="bar-labels"><span>Aug 28</span><span>Today</span></div></div><div className="mini-panel last-session"><div className="panel-title"><span>Last session</span><span>{lastWorkout ? formatDate(lastWorkout.date) : '—'}</span></div><strong>{lastWorkout?.title ?? 'No sessions yet'}</strong><p>{lastWorkout ? `${lastWorkout.sets.length} sets logged` : 'Your first session is waiting.'}</p><button className="text-button">View details →</button></div></aside></section><section className="focus-strip"><div><span className="eyebrow">This week</span><strong>Keep the rhythm</strong></div><div className="focus-stats"><span><strong>2</strong> workouts</span><span><strong>6</strong> exercises</span><span><strong>0</strong> skipped</span></div></section></>
+}
+
+function HistoryView({ workouts }: { workouts: Workout[] }) {
+  const [selectedExerciseId, setSelectedExerciseId] = useState<string | null>(null)
+  const selected = exercises.find((exercise) => exercise.id === selectedExerciseId)
+  const exerciseSets = workouts.flatMap((workout) => workout.sets.filter((set) => set.exerciseId === selectedExerciseId).map((set) => ({ ...set, date: workout.date })))
+  return <><section className="page-intro compact"><div><p className="eyebrow">Your training archive</p><h1>History</h1><p className="lede">Every session is evidence. Browse the work, then spot the trend.</p></div><span className="archive-count">{workouts.length} sessions</span></section><div className="history-layout"><section className="history-list"><div className="section-heading"><h2>Recent workouts</h2><span className="muted">Newest first</span></div>{workouts.map((workout) => <article className="workout-row" key={workout.id}><div className="date-block"><strong>{new Date(`${workout.date}T12:00:00`).toLocaleDateString('en-US', { day: '2-digit' })}</strong><span>{new Date(`${workout.date}T12:00:00`).toLocaleDateString('en-US', { month: 'short' })}</span></div><div className="workout-info"><strong>{workout.title}</strong><span>{new Set(workout.sets.map((set) => set.exerciseId)).size} exercises · {workout.sets.length} sets</span></div><span className="row-arrow">→</span></article>)}</section><aside className="progression-detail"><div className="section-heading"><h2>Exercise progression</h2></div><select value={selectedExerciseId ?? ''} onChange={(event) => setSelectedExerciseId(event.target.value || null)}><option value="">Select an exercise</option>{exercises.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}</select>{selected ? <div className="progression-content"><p className="eyebrow">{selected.name}</p><div className="progression-stat"><strong>{exerciseSets.length ? exerciseSets[0].weight : 0}</strong><span>lb latest load</span></div>{exerciseSets.slice(0, 8).map((set) => <div className="progression-set" key={`${set.id}-${set.date}`}><span>{formatDate(set.date)}</span><strong>{set.weight} × {set.reps}</strong></div>)}</div> : <p className="empty-state">Choose an exercise to see its set-by-set progression.</p>}</aside></div></>
+}
+
+function ExercisesView() {
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('All')
+  const [expandedId, setExpandedId] = useState<string | null>(null)
+  const categories = ['All', ...new Set(exercises.map((exercise) => exercise.category))]
+  const filteredExercises = exercises.filter((exercise) => {
+    const haystack = `${exercise.name} ${exercise.category} ${exercise.equipment} ${exercise.primaryMuscles.join(' ')}`.toLowerCase()
+    return haystack.includes(query.toLowerCase()) && (filter === 'All' || exercise.category === filter)
+  })
+  return <><section className="page-intro compact"><div><p className="eyebrow">Exercise database</p><h1>Every movement, in one place.</h1><p className="lede">Search by movement, muscle, or equipment. Open an exercise to inspect its training context.</p></div></section><div className="library-toolbar"><label className="search-field"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search exercises, muscles, equipment..." aria-label="Search exercises" />{query && <button onClick={() => setQuery('')} aria-label="Clear search">×</button>}</label><div className="filter-row">{categories.map((category) => <button key={category} className={filter === category ? 'filter-chip active' : 'filter-chip'} onClick={() => setFilter(category)}>{category}</button>)}</div></div><div className="result-line"><span>{filteredExercises.length} movements</span><span>Click a row for details</span></div><div className="exercise-library">{filteredExercises.map((exercise) => { const expanded = expandedId === exercise.id; return <article className={expanded ? 'library-card expanded' : 'library-card'} key={exercise.id}><button className="exercise-row-trigger" onClick={() => setExpandedId(expanded ? null : exercise.id)} aria-expanded={expanded}><span className="library-icon">{exercise.type === 'compound' ? '◎' : '◒'}</span><span className="library-copy"><span className="card-kicker">{exercise.type} · {exercise.category}</span><strong>{exercise.name}</strong><small>{exercise.equipment}</small></span><span className="expand-mark">{expanded ? '−' : '+'}</span></button>{expanded && <div className="exercise-details"><div><span className="detail-label">Primary muscles</span><div className="tag-list">{exercise.primaryMuscles.map((muscle) => <span key={muscle}>{muscle}</span>)}</div></div><div className="detail-grid"><div><span className="detail-label">Goals</span><strong>{exercise.goals.join(' · ')}</strong></div><div><span className="detail-label">Working range</span><strong>{exercise.defaultSets} sets · {exercise.repRange.min}–{exercise.repRange.max} reps</strong></div><div><span className="detail-label">Equipment</span><strong>{exercise.equipment}</strong></div><div><span className="detail-label">Pattern</span><strong>{exercise.category}</strong></div></div></div>}</article> })}{filteredExercises.length === 0 && <div className="no-results"><strong>No movements found</strong><span>Try a different name, muscle, or equipment.</span></div>}</div></>
+}
+
+export function LegacyExercisesView({ onSelect }: { onSelect: (id: string) => void }) {
+  const [section, setSection] = useState<'exercises' | 'workouts'>('exercises')
+  const [query, setQuery] = useState('')
+  const [filter, setFilter] = useState('All')
+  const [savedIds, setSavedIds] = useState(() => new Set(loadSavedTemplates().map((template) => template.id)))
+  const categories = ['All', ...new Set(exercises.map((exercise) => exercise.category))]
+  const filteredExercises = exercises.filter((exercise) => {
+    const haystack = `${exercise.name} ${exercise.category} ${exercise.equipment} ${exercise.primaryMuscles.join(' ')}`.toLowerCase()
+    return haystack.includes(query.toLowerCase()) && (filter === 'All' || exercise.category === filter)
+  })
+  function saveTemplate(id: string) {
+    const template = workoutTemplates.find((item) => item.id === id)
+    if (!template) return
+    const next = toggleSavedTemplate(template)
+    setSavedIds(new Set(next.map((item) => item.id)))
+  }
+  return <>
+    <section className="page-intro compact"><div><p className="eyebrow">Training library</p><h1>Build your session.</h1><p className="lede">Find a movement or start with a ready-made plan.</p></div></section>
+    <div className="library-tabs" role="tablist"><button className={section === 'exercises' ? 'library-tab active' : 'library-tab'} onClick={() => setSection('exercises')}>Exercises <span>{exercises.length}</span></button><button className={section === 'workouts' ? 'library-tab active' : 'library-tab'} onClick={() => setSection('workouts')}>Premade workouts <span>{workoutTemplates.length}</span></button></div>
+    {section === 'exercises' ? <><div className="library-toolbar"><label className="search-field"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search exercises, muscles, equipment..." aria-label="Search exercises" />{query && <button onClick={() => setQuery('')} aria-label="Clear search">×</button>}</label><div className="filter-row">{categories.map((category) => <button key={category} className={filter === category ? 'filter-chip active' : 'filter-chip'} onClick={() => setFilter(category)}>{category}</button>)}</div></div><div className="result-line"><span>{filteredExercises.length} movements</span><span>Tap a movement to use it today</span></div><div className="exercise-library">{filteredExercises.map((exercise) => <article className="library-card" key={exercise.id}><div className="library-icon">{exercise.type === 'compound' ? '◎' : '◒'}</div><div className="library-copy"><div className="card-kicker">{exercise.type} · {exercise.category}</div><h2>{exercise.name}</h2><p>{exercise.equipment}</p><div className="tag-list">{exercise.primaryMuscles.map((muscle) => <span key={muscle}>{muscle}</span>)}</div></div><button className="outline-button" onClick={() => onSelect(exercise.id)}>Use today →</button></article>)}{filteredExercises.length === 0 && <div className="no-results"><strong>No movements found</strong><span>Try a different name, muscle, or equipment.</span></div>}</div></> : <div className="template-grid">{workoutTemplates.map((template) => <article className="template-card" key={template.id}><div className="template-art"><span>{template.name.slice(0, 1)}</span><small>{template.exerciseIds.length} exercises</small></div><div className="template-body"><div className="card-kicker">{template.focus}</div><h2>{template.name}</h2><p>{template.description}</p><div className="template-exercises">{template.exerciseIds.slice(0, 4).map((id) => <span key={id}>{exercises.find((exercise) => exercise.id === id)?.name}</span>)}</div><div className="template-actions"><button className="primary-button">Start workout</button><button className={savedIds.has(template.id) ? 'save-button saved' : 'save-button'} onClick={() => saveTemplate(template.id)}>{savedIds.has(template.id) ? '♥ Saved' : '♡ Save'}</button></div></div></article>)}</div>}
+  </>
+}
+
+function PlansView({ plans, onSave, onStart }: { plans: WorkoutTemplate[]; onSave: (plan: WorkoutTemplate) => void; onStart: (plan: WorkoutTemplate) => void }) {
+  const [name, setName] = useState('')
+  const [focus, setFocus] = useState('')
+  const [selectedIds, setSelectedIds] = useState<string[]>([])
+  const [exerciseToAdd, setExerciseToAdd] = useState(exercises[0].id)
+  function addExercise() {
+    if (!selectedIds.includes(exerciseToAdd)) setSelectedIds((current) => [...current, exerciseToAdd])
+  }
+  function createPlan() {
+    if (!name.trim() || selectedIds.length === 0) return
+    onSave({ id: `plan-${crypto.randomUUID()}`, name: name.trim(), description: 'A plan built around your current priorities.', focus: focus.trim() || 'Personal plan', exerciseIds: selectedIds })
+    setName(''); setFocus(''); setSelectedIds([])
+  }
+  const allPlans = [...plans, ...workoutTemplates.filter((template) => !plans.some((plan) => plan.id === template.id))]
+  return <><section className="page-intro compact"><div><p className="eyebrow">Your training system</p><h1>Plans</h1><p className="lede">Create the days you want to repeat. Bobby will keep the history and progression underneath.</p></div></section><div className="plan-builder-layout"><section className="plan-builder"><div className="section-heading"><div><p className="eyebrow">New plan</p><h2>Build your own day</h2></div><span className="plan-count">{selectedIds.length} exercises</span></div><div className="input-row"><label>Plan name<input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Pull day" /></label><label>Focus<input value={focus} onChange={(event) => setFocus(event.target.value)} placeholder="e.g. Back · Biceps" /></label></div><label className="add-exercise-label">Add an exercise<select value={exerciseToAdd} onChange={(event) => setExerciseToAdd(event.target.value)}>{exercises.map((exercise) => <option key={exercise.id} value={exercise.id}>{exercise.name}</option>)}</select></label><button className="secondary-button" onClick={addExercise}>＋ Add to plan</button><div className="builder-list">{selectedIds.length === 0 ? <p className="empty-state">Your plan is empty. Add the movements you want to train.</p> : selectedIds.map((id, index) => { const exercise = exercises.find((item) => item.id === id); return exercise ? <div className="builder-row" key={id}><span>{String(index + 1).padStart(2, '0')}</span><strong>{exercise.name}</strong><small>{exercise.defaultSets} sets · {exercise.repRange.min}–{exercise.repRange.max}</small><button onClick={() => setSelectedIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${exercise.name}`}>×</button></div> : null })}</div><button className="primary-button" disabled={!name.trim() || selectedIds.length === 0} onClick={createPlan}>Save plan</button></section><aside className="saved-plans"><div className="section-heading"><div><p className="eyebrow">Ready when you are</p><h2>Saved plans</h2></div></div>{allPlans.map((plan) => <article className="saved-plan" key={plan.id}><div><strong>{plan.name}</strong><span>{plan.focus} · {plan.exerciseIds.length} exercises</span></div><button className="text-button" onClick={() => onStart(plan)}>Start →</button></article>)}</aside></div></>
+}
+
+function formatDate(date: string) { return new Date(`${date}T12:00:00`).toLocaleDateString('en-US', { month: 'short', day: 'numeric' }) }
+
+export default App
