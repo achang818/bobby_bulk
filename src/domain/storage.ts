@@ -1,8 +1,11 @@
-import type { Workout, WorkoutTemplate } from './models'
+import type { UserPreferences, Workout, WorkoutTemplate } from './models'
+import { defaultPreferences } from './preferences'
 
 const STORAGE_KEY = 'bobby-bulk-workouts'
 const TEMPLATE_KEY = 'bobby-bulk-templates'
 const PLAN_KEY = 'bobby-bulk-plans'
+const PREFERENCES_KEY = 'bobby-bulk-preferences'
+const DECISIONS_KEY = 'bobby-bulk-recommendation-decisions'
 
 export function loadWorkouts(): Workout[] {
   const stored = localStorage.getItem(STORAGE_KEY)
@@ -37,4 +40,21 @@ export function savePlan(plan: WorkoutTemplate): WorkoutTemplate[] {
   const plans = [plan, ...loadPlans().filter((item) => item.id !== plan.id)]
   localStorage.setItem(PLAN_KEY, JSON.stringify(plans))
   return plans
+}
+
+export function loadPreferences(): UserPreferences {
+  const stored = localStorage.getItem(PREFERENCES_KEY)
+  return stored ? { ...defaultPreferences, ...(JSON.parse(stored) as Partial<UserPreferences>) } : defaultPreferences
+}
+
+export function savePreferences(preferences: UserPreferences): UserPreferences {
+  localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences))
+  return preferences
+}
+
+export function saveRecommendationDecision(recommendationId: string, decision: 'accepted' | 'rejected' | 'dismissed'): Record<string, string> {
+  const decisions = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '{}') as Record<string, string>
+  decisions[recommendationId] = decision
+  localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions))
+  return decisions
 }
