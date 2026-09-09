@@ -98,6 +98,7 @@ export interface MuscleFeatures {
   rolling14DaySets: number
   rolling28DaySets: number
   daysSinceTrained?: number
+  frequency14Days: number
   frequency28Days: number
   volumeState: MuscleVolumeState
 }

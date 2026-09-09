@@ -5,7 +5,9 @@ export const decisionRules = {
   'double-progression': 'progressive-overload',
   'keep-stable-exercise': 'consistent-execution',
   'replace-on-stall': 'plateau-variation',
+  'replace-on-stall-specific': 'muscle-specific-loading',
   'add-for-priority-volume': 'volume-hypertrophy',
+  'add-for-priority-frequency': 'frequency-distribution',
   'adapt-unavailable-equipment': 'equipment-constraint',
   'adapt-available-time': 'time-constraint',
 } as const

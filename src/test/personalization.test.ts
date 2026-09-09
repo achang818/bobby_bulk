@@ -65,6 +65,44 @@ describe('plan evaluation', () => {
     expect(add?.trace.ruleId).toBe('add-for-priority-volume')
   })
 
+  it('recommends a priority add for adequate volume that is poorly distributed', () => {
+    const history: Workout[] = [{
+      id: 'a', date: '2026-09-01', title: 'Shoulders', sets: Array.from({ length: 6 }, (_, index) => ({ id: `set-${index}`, exerciseId: lateralRaise.id, weight: 20, reps: 12 })),
+    }]
+    const result = evaluatePlan(plan, exercises, history, prefs, '2026-09-09')
+    const add = result.find((item) => item.type === 'ADD')
+
+    expect(add?.exerciseId).toBe(lateralRaise.id)
+    expect(add?.trace.ruleId).toBe('add-for-priority-frequency')
+    expect(add?.trace.principleId).toBe('frequency-distribution')
+  })
+
+  it('does not add a push exercise to a pull-style plan for an unrelated priority', () => {
+    const pullPlan: WorkoutPlan = { id: 'pull', name: 'Pull', description: 'test', focus: 'Back', exerciseIds: ['cable-row', 'face-pull'] }
+    const history = [workout('a', '2026-09-01', bench.id, 8)]
+    const result = evaluatePlan(pullPlan, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Upper chest'] }, '2026-09-09')
+
+    expect(result.filter((item) => item.type === 'ADD')).toEqual([])
+  })
+
+  it('adds a coherent upper-chest exercise to a push-style plan', () => {
+    const pushPlan: WorkoutPlan = { id: 'push', name: 'Push', description: 'test', focus: 'Chest', exerciseIds: ['barbell-bench-press', 'dumbbell-shoulder-press'] }
+    const history = [workout('a', '2026-09-01', bench.id, 8)]
+    const result = evaluatePlan(pushPlan, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Upper chest'] }, '2026-09-09')
+    const add = result.find((item) => item.type === 'ADD')
+
+    expect(add?.exerciseId).toBe(bench.id)
+    expect(add?.reasons).toContain("This exercise fits your plan's existing muscle groups.")
+  })
+
+  it('allows a priority add for a single-exercise plan without coherence context', () => {
+    const sparsePlan: WorkoutPlan = { id: 'sparse', name: 'Sparse', description: 'test', focus: 'Back', exerciseIds: ['cable-row'] }
+    const history = [workout('a', '2026-09-01', bench.id, 8)]
+    const result = evaluatePlan(sparsePlan, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Upper chest'] }, '2026-09-09')
+
+    expect(result.find((item) => item.type === 'ADD')?.exerciseId).toBe(bench.id)
+  })
+
   it('does not recommend a disliked exercise', () => {
     const result = evaluatePlan(plan, exercises, [workout('a', '2026-09-01', bench.id, 8), workout('b', '2026-09-05', lateralRaise.id, 12)], { ...prefs, dislikedExerciseIds: [lateralRaise.id] }, '2026-09-09')
     expect(result.some((item) => item.exerciseId === lateralRaise.id)).toBe(false)
@@ -76,6 +114,30 @@ describe('plan evaluation', () => {
     const replacement = result.find((item) => item.type === 'REPLACE')
     expect(replacement?.exerciseId).toBe(bench.id)
     expect(replacement?.alternativeExerciseId).toBeDefined()
+    expect(replacement?.trace.ruleId).toBe('replace-on-stall')
+  })
+
+  it('prefers a muscle-specific isolation replacement and traces that preference', () => {
+    const stalledIsolation = { id: 'stalled-fly', name: 'Stalled Fly', category: 'Isolation', equipment: 'Cable', primaryMuscles: ['Chest', 'Triceps'], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const broadCandidate = { id: 'broad-press', name: 'Broad Press', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest'], goals: ['Build muscle'], type: 'compound' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const specificCandidate = { id: 'specific-fly', name: 'Specific Fly', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest', 'Triceps'], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const isolationPlan: WorkoutPlan = { id: 'isolation', name: 'Isolation', description: 'test', focus: 'Chest', exerciseIds: [stalledIsolation.id] }
+    const history = [workout('a', '2026-08-20', stalledIsolation.id, 12), workout('b', '2026-08-25', stalledIsolation.id, 12), workout('c', '2026-09-01', stalledIsolation.id, 12)]
+
+    const replacement = evaluatePlan(isolationPlan, [stalledIsolation, broadCandidate, specificCandidate], history, defaultPreferences, '2026-09-09').find((item) => item.type === 'REPLACE')
+    expect(replacement?.alternativeExerciseId).toBe(specificCandidate.id)
+    expect(replacement?.trace.ruleId).toBe('replace-on-stall-specific')
+    expect(replacement?.trace.principleId).toBe('muscle-specific-loading')
+  })
+
+  it('uses the existing stall replacement trace when no specific isolation candidate exists', () => {
+    const stalledIsolation = { id: 'stalled-fly', name: 'Stalled Fly', category: 'Isolation', equipment: 'Cable', primaryMuscles: ['Chest', 'Triceps'], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const broadCandidate = { id: 'broad-press', name: 'Broad Press', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest'], goals: ['Build muscle'], type: 'compound' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const isolationPlan: WorkoutPlan = { id: 'isolation', name: 'Isolation', description: 'test', focus: 'Chest', exerciseIds: [stalledIsolation.id] }
+    const history = [workout('a', '2026-08-20', stalledIsolation.id, 12), workout('b', '2026-08-25', stalledIsolation.id, 12), workout('c', '2026-09-01', stalledIsolation.id, 12)]
+
+    const replacement = evaluatePlan(isolationPlan, [stalledIsolation, broadCandidate], history, defaultPreferences, '2026-09-09').find((item) => item.type === 'REPLACE')
+    expect(replacement?.alternativeExerciseId).toBe(broadCandidate.id)
     expect(replacement?.trace.ruleId).toBe('replace-on-stall')
   })
 })
