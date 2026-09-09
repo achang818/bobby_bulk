@@ -1,4 +1,4 @@
-import type { Gym, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
+import type { Gym, PlanRecommendation, RecommendationDecision, RecommendationDecisionType, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
 import { defaultPreferences } from './preferences'
 
 const STORAGE_KEY = 'bobby-bulk-workouts'
@@ -86,13 +86,23 @@ export function saveTodaysContext(context: TodaysContext): TodaysContext {
   return context
 }
 
-export function saveRecommendationDecision(recommendationId: string, decision: 'accepted' | 'rejected' | 'dismissed'): Record<string, string> {
-  const decisions = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '{}') as Record<string, string>
-  decisions[recommendationId] = decision
+export function saveRecommendationDecision(recommendation: PlanRecommendation, decision: RecommendationDecisionType): RecommendationDecision[] {
+  const decisions = [...loadRecommendationDecisions(), {
+    id: crypto.randomUUID(),
+    recommendationId: recommendation.id,
+    recommendationType: recommendation.type,
+    exerciseId: recommendation.exerciseId,
+    decision,
+  }]
   localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions))
   return decisions
 }
 
-export function loadRecommendationDecisions(): Record<string, string> {
-  return JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '{}') as Record<string, string>
+export function loadRecommendationDecisions(): RecommendationDecision[] {
+  const parsed = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '[]') as unknown
+  return Array.isArray(parsed) ? parsed as RecommendationDecision[] : []
+}
+
+export function latestRecommendationDecision(recommendationId: string, decisions: RecommendationDecision[]): RecommendationDecisionType | undefined {
+  return [...decisions].reverse().find((item) => item.recommendationId === recommendationId)?.decision
 }

@@ -21,10 +21,11 @@ export function equipmentTagFor(exercise: Exercise): EquipmentTag {
   return 'other'
 }
 
-export function findContextualSubstitute(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences): Exercise | undefined {
+export function findContextualSubstitute(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set()): Exercise | undefined {
   if (!todaysContext.unavailableEquipment.includes(equipmentTagFor(exercise))) return undefined
   return exercises
     .filter((candidate) => candidate.id !== exercise.id)
+    .filter((candidate) => !excludedExerciseIds.has(candidate.id))
     .filter((candidate) => !todaysContext.unavailableEquipment.includes(equipmentTagFor(candidate)))
     .filter((candidate) => candidate.category === exercise.category)
     .filter((candidate) => candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)))
@@ -37,13 +38,16 @@ export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysCon
   const limit = traveling ? Number.POSITIVE_INFINITY : MAX_CONTEXTUAL_SUBSTITUTIONS
   let substitutions = 0
   const trace = buildTrace('adapt-unavailable-equipment')
+  // Preserve distinct movement slots: do not substitute in an exercise already planned today.
+  const selectedSubstituteIds = new Set<string>(plan.exerciseIds)
   return plan.exerciseIds.flatMap((exerciseId) => {
     if (substitutions >= limit) return []
     const exercise = exercises.find((item) => item.id === exerciseId)
     if (!exercise) return []
-    const alternative = findContextualSubstitute(exercise, exercises, todaysContext, preferences)
+    const alternative = findContextualSubstitute(exercise, exercises, todaysContext, preferences, selectedSubstituteIds)
     if (!alternative) return []
     substitutions += 1
+    selectedSubstituteIds.add(alternative.id)
     return [{
       id: `context-${plan.id}-${exercise.id}`,
       type: 'REPLACE',

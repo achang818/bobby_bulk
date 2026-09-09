@@ -144,6 +144,16 @@ export interface PlanRecommendation {
   trace: RecommendationTrace
 }
 
+export type RecommendationDecisionType = 'accepted' | 'rejected' | 'dismissed'
+
+export interface RecommendationDecision {
+  id: string
+  recommendationId: string
+  recommendationType: PlanRecommendationType
+  exerciseId: string
+  decision: RecommendationDecisionType
+}
+
 export interface Recommendation {
   exercise: Exercise
   weight: number

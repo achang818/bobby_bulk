@@ -1,4 +1,4 @@
-import type { ExerciseProgressState, MuscleVolumeState, PreferenceState, Workout } from './models'
+import type { ExerciseProgressState, MuscleVolumeState, PreferenceState, RecommendationDecision, Workout } from './models'
 
 export type FatigueLevel = 'Low' | 'Moderate' | 'High'
 
@@ -20,9 +20,14 @@ export function classifyMuscleVolume(recentSets: number): MuscleVolumeState {
   return 'moderate recent volume'
 }
 
-export function classifyPreference(exerciseId: string, preferences: { preferredExerciseIds: string[]; dislikedExerciseIds: string[] }): PreferenceState {
+export function rejectedKeepCount(exerciseId: string, decisions: RecommendationDecision[] = []): number {
+  return decisions.filter((item) => item.exerciseId === exerciseId && ['REPLACE', 'REMOVE'].includes(item.recommendationType) && ['rejected', 'dismissed'].includes(item.decision)).length
+}
+
+export function classifyPreference(exerciseId: string, preferences: { preferredExerciseIds: string[]; dislikedExerciseIds: string[] }, decisions: RecommendationDecision[] = []): PreferenceState {
   if (preferences.preferredExerciseIds.includes(exerciseId)) return 'preferred'
   if (preferences.dislikedExerciseIds.includes(exerciseId)) return 'disliked'
+  if (rejectedKeepCount(exerciseId, decisions) >= 2) return 'preferred'
   return 'neutral'
 }
 

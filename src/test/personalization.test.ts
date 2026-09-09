@@ -3,7 +3,7 @@ import { calculateExerciseFeatures, calculateMuscleFeatures } from '../domain/fe
 import { exercises } from '../domain/exercises'
 import { evaluatePlan } from '../domain/plan-evaluator'
 import { defaultPreferences } from '../domain/preferences'
-import type { UserPreferences, Workout, WorkoutPlan } from '../domain/models'
+import type { RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from '../domain/models'
 
 const bench = exercises.find((exercise) => exercise.id === 'incline-db-bench')!
 const lateralRaise = exercises.find((exercise) => exercise.id === 'cable-lateral-raise')!
@@ -115,6 +115,17 @@ describe('plan evaluation', () => {
     expect(replacement?.exerciseId).toBe(bench.id)
     expect(replacement?.alternativeExerciseId).toBeDefined()
     expect(replacement?.trace.ruleId).toBe('replace-on-stall')
+  })
+
+  it('backs off a replacement after two keep-plan decisions while an unopposed stall still recommends one', () => {
+    const history = [workout('a', '2026-08-20', bench.id, 8), workout('b', '2026-08-25', bench.id, 8), workout('c', '2026-09-01', bench.id, 8)]
+    const decisions: RecommendationDecision[] = [
+      { id: '1', recommendationId: 'replace-upper-incline-db-bench', recommendationType: 'REPLACE', exerciseId: bench.id, decision: 'dismissed' },
+      { id: '2', recommendationId: 'replace-upper-incline-db-bench', recommendationType: 'REPLACE', exerciseId: bench.id, decision: 'rejected' },
+    ]
+
+    expect(evaluatePlan(plan, exercises, history, { ...defaultPreferences, goals: ['Get stronger'] }, '2026-09-09').some((item) => item.type === 'REPLACE')).toBe(true)
+    expect(evaluatePlan(plan, exercises, history, { ...defaultPreferences, goals: ['Get stronger'] }, '2026-09-09', undefined, decisions).some((item) => item.type === 'REPLACE')).toBe(false)
   })
 
   it('prefers a muscle-specific isolation replacement and traces that preference', () => {

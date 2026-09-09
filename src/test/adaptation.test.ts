@@ -37,6 +37,26 @@ describe('context adaptation', () => {
     expect(substitute?.id).not.toBe('chest-supported-row')
     expect(substitute?.id).not.toBe('single-arm-db-row')
   })
+
+  it('does not reuse one substitute for multiple unavailable pull exercises', () => {
+    const pullPlan: WorkoutPlan = {
+      id: 'pull', name: 'Pull', description: 'test', focus: 'Back',
+      exerciseIds: ['cable-row', 'lat-pulldown'],
+    }
+    const replacements = adaptWorkout(pullPlan, exercises, context('default-gym', ['cables']), defaultPreferences)
+
+    expect(new Set(replacements.map((recommendation) => recommendation.alternativeExerciseId)).size).toBe(replacements.length)
+  })
+
+  it('does not substitute an exercise that is already in the plan', () => {
+    const pullPlan: WorkoutPlan = {
+      id: 'pull-with-pullups', name: 'Pull', description: 'test', focus: 'Back',
+      exerciseIds: ['pull-up', 'cable-row'],
+    }
+    const replacements = adaptWorkout(pullPlan, exercises, context('default-gym', ['cables']), defaultPreferences)
+
+    expect(replacements.some((recommendation) => recommendation.alternativeExerciseId === 'pull-up')).toBe(false)
+  })
 })
 
 describe('time adaptation', () => {

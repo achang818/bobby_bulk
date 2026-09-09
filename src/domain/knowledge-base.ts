@@ -56,6 +56,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
   },
 
   {
+    id: 'autoregulated-load-adjustment',
+    topic: 'Autoregulation using RIR/RPE',
+    description:
+      'When repeated RIR or RPE observations show that a prescribed load is consistently much easier or harder than intended, load or planned volume can be adjusted within the user’s target range. A single observation should not override the established progression trend.',
+    evidenceLevel: 'C',
+    source: {
+      name: 'The Effect of Load and Volume Autoregulation on Muscular Strength and Hypertrophy: A Systematic Review and Meta-Analysis',
+      year: 2022,
+    },
+  },
+
+  {
     id: 'load-goal-specificity',
     topic: 'Load selection for strength and hypertrophy',
     description:
@@ -103,6 +115,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
     evidenceLevel: 'A',
     source: {
       name: 'ACSM Resistance Training Position Stand',
+      year: 2026,
+    },
+  },
+
+  {
+    id: 'direct-and-indirect-volume',
+    topic: 'Direct and indirect training volume',
+    description:
+      'Training-volume estimates should distinguish direct work for a muscle from indirect involvement in multi-joint exercises. Indirect work can contribute to training exposure, but should not automatically be counted as equivalent to a direct working set for every involved muscle.',
+    evidenceLevel: 'B',
+    source: {
+      name: 'The Resistance Training Dose Response: Meta-Regressions Exploring the Effects of Weekly Volume and Frequency on Muscle Hypertrophy and Strength Gains',
       year: 2026,
     },
   },
@@ -244,6 +268,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
   },
 
   {
+    id: 'exercise-familiarization',
+    topic: 'Exercise familiarization and skill acquisition',
+    description:
+      'Early performance changes after introducing an exercise can reflect task familiarization and skill acquisition as well as physical adaptation. Performance from a newly introduced exercise should therefore receive less weight until several comparable exposures have been completed.',
+    evidenceLevel: 'C',
+    source: {
+      name: 'Muscle Adaptations Following 21 Consecutive Days of Strength Test Familiarization Compared with Traditional Training',
+      year: 2017,
+    },
+  },
+
+  {
     id: 'exercise-priority-order',
     topic: 'Exercise order',
     description:
@@ -264,6 +300,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
     source: {
       name: 'Exercise Order Systematic Review and Meta-analysis',
       year: 2021,
+    },
+  },
+
+  {
+    id: 'strength-periodization',
+    topic: 'Periodization for strength',
+    description:
+      'When training volume is comparable, planned variation in load and volume can modestly improve maximal-strength outcomes, particularly for trained individuals. The specific periodization model should not be treated as universally necessary, and hypertrophy outcomes may be similar when volume is equated.',
+    evidenceLevel: 'B',
+    source: {
+      name: 'Effects of Periodization on Strength and Muscle Hypertrophy in Volume-Equated Resistance Training Programs: A Systematic Review and Meta-Analysis',
+      year: 2022,
     },
   },
 
@@ -455,6 +503,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
     evidenceLevel: 'Personal',
     source: {
       name: 'Bobby personal-history evidence',
+      year: 2026,
+    },
+  },
+
+  {
+    id: 'revealed-exercise-preference',
+    topic: 'Personal exercise preference',
+    description:
+      'Repeated explicit preferences, accepted recommendations, rejections, and actual exercise choices are personal evidence about exercise fit. They should influence recommendation ranking as a soft weighting, while strong safety, context, or performance evidence can still outweigh them.',
+    evidenceLevel: 'Personal',
+    source: {
+      name: 'Bobby personal-preference evidence',
       year: 2026,
     },
   },

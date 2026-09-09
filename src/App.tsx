@@ -13,6 +13,7 @@ import {
   loadWorkouts,
   loadGyms,
   loadRecommendationDecisions,
+  latestRecommendationDecision,
   loadTodaysContext,
   deletePlan,
   deleteWorkout,
@@ -23,6 +24,7 @@ import {
   saveTodaysContext,
   toggleSavedTemplate,
 } from "./domain/storage";
+import { applyAcceptedRecommendation } from "./domain/plan-actions";
 import { displayWeight } from "./domain/units";
 import type {
   LoggedSet,
@@ -34,6 +36,7 @@ import type {
   WorkoutTemplate,
   EquipmentTag,
   Gym,
+  RecommendationDecision,
   TodaysContext,
 } from "./domain/models";
 
@@ -65,7 +68,7 @@ function App() {
   const [draftSets, setDraftSets] = useState<LoggedSet[]>([]);
   const [setInputOverrides, setSetInputOverrides] = useState<Record<string, SetInput>>({});
   const [showLogger, setShowLogger] = useState(false);
-  const [recommendationDecisions, setRecommendationDecisions] = useState<Record<string, string>>(() => loadRecommendationDecisions());
+  const [recommendationDecisions, setRecommendationDecisions] = useState<RecommendationDecision[]>(() => loadRecommendationDecisions());
   const [activePlan, setActivePlan] = useState<WorkoutTemplate>(() => loadPlans()[0] ?? emptyPlan);
   const [plans, setPlans] = useState<WorkoutTemplate[]>(() => loadPlans());
   const [preferences, setPreferences] = useState<UserPreferences>(() =>
@@ -92,29 +95,29 @@ function App() {
     return exercise?.primaryMuscles.some((muscle) => preferences.priorities.some((priority) => priority.toLowerCase() === muscle.toLowerCase())) ?? false;
   });
   const planRecommendations = useMemo(
-    () => [...evaluatePlan(activePlan, exercises, workoutsInCurrentUnit, preferences, undefined, currentGym.availableLoads), ...adaptWorkout(activePlan, exercises, todaysContext, preferences), ...adaptWorkoutForTime(activePlan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds)].sort((a, b) => b.score - a.score),
-    [activePlan, currentGym.availableLoads, goalCriticalExerciseIds, preferences, todaysContext, workoutsInCurrentUnit],
+    () => [...evaluatePlan(activePlan, exercises, workoutsInCurrentUnit, preferences, undefined, currentGym.availableLoads, recommendationDecisions), ...adaptWorkout(activePlan, exercises, todaysContext, preferences), ...adaptWorkoutForTime(activePlan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds)].sort((a, b) => b.score - a.score),
+    [activePlan, currentGym.availableLoads, goalCriticalExerciseIds, preferences, recommendationDecisions, todaysContext, workoutsInCurrentUnit],
   );
   const adaptedPlanExerciseIds = useMemo(() => activePlan.exerciseIds.map((id) => {
     const recommendation = planRecommendations.find((item) =>
       item.type === "REPLACE" &&
       item.exerciseId === id &&
       item.alternativeExerciseId &&
-      (item.trace.ruleId === "adapt-unavailable-equipment" || recommendationDecisions[item.id] === "accepted"),
+      (item.trace.ruleId === "adapt-unavailable-equipment" || latestRecommendationDecision(item.id, recommendationDecisions) === "accepted"),
     );
     return recommendation?.alternativeExerciseId ?? id;
   }), [activePlan.exerciseIds, planRecommendations, recommendationDecisions]);
-  const workoutExerciseIds = useMemo(() => adaptedPlanExerciseIds.filter((id) => !planRecommendations.some((item) => item.type === "REMOVE" && item.exerciseId === id && item.trace.ruleId === "adapt-available-time" && recommendationDecisions[item.id] !== "dismissed")), [adaptedPlanExerciseIds, planRecommendations, recommendationDecisions]);
+  const workoutExerciseIds = useMemo(() => adaptedPlanExerciseIds.filter((id) => !planRecommendations.some((item) => item.type === "REMOVE" && item.exerciseId === id && item.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(item.id, recommendationDecisions) !== "dismissed")), [adaptedPlanExerciseIds, planRecommendations, recommendationDecisions]);
   const setTargets = useMemo(() => new Map(workoutExerciseIds.map((id) => {
     const exercise = exercises.find((item) => item.id === id);
-    const recommendation = planRecommendations.find((item) => item.type === "MODIFY" && item.exerciseId === id && item.trace.ruleId === "adapt-available-time" && recommendationDecisions[item.id] !== "dismissed");
+    const recommendation = planRecommendations.find((item) => item.type === "MODIFY" && item.exerciseId === id && item.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(item.id, recommendationDecisions) !== "dismissed");
     return [id, recommendation?.modifiedSets ?? exercise?.defaultSets ?? 0];
   })), [planRecommendations, recommendationDecisions, workoutExerciseIds]);
 
   const initialSetInput = useMemo<SetInput>(() => {
     const exercise = exercises.find((item) => item.id === selectedExerciseId);
     if (!exercise) return { weight: "0", reps: "0", rir: "" };
-    const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && item.exerciseId === selectedExerciseId && recommendationDecisions[item.id] !== "dismissed")?.progression;
+    const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && item.exerciseId === selectedExerciseId && latestRecommendationDecision(item.id, recommendationDecisions) !== "dismissed")?.progression;
     const latestSet = [...workouts]
       .sort((a, b) => b.date.localeCompare(a.date))
       .flatMap((workout) => workout.sets.filter((set) => set.exerciseId === selectedExerciseId).map((set) => ({
@@ -215,6 +218,15 @@ function App() {
     setShowLogger(true);
   }
 
+  function handleRecommendationDecision(recommendation: PlanRecommendation, decision: "accepted" | "rejected" | "dismissed") {
+    setRecommendationDecisions(saveRecommendationDecision(recommendation, decision));
+    if (decision !== "accepted") return;
+    const updatedPlan = applyAcceptedRecommendation(activePlan, recommendation);
+    if (updatedPlan.exerciseIds.join("|") === activePlan.exerciseIds.join("|")) return;
+    setActivePlan(updatedPlan);
+    setPlans(savePlan(updatedPlan));
+  }
+
   return (
     <div className="app-shell">
       <header className="topbar">
@@ -289,7 +301,7 @@ function App() {
             onContextChange={updateTodaysContext}
             onLog={startRecommendedWorkout}
             onChooseSomethingElse={() => setView("plans")}
-            onDecision={(id, decision) => setRecommendationDecisions(saveRecommendationDecision(id, decision))}
+            onDecision={handleRecommendationDecision}
           />
         )}
         {view === "history" && (
@@ -629,7 +641,7 @@ function EvaluatedTodayView({
   exerciseIds: string[];
   setTargets: Map<string, number>;
   recommendations: PlanRecommendation[];
-  decisions: Record<string, string>;
+  decisions: RecommendationDecision[];
   workouts: Workout[];
   unit: WeightUnit;
   gyms: Gym[];
@@ -639,7 +651,7 @@ function EvaluatedTodayView({
   onLog: () => void;
   onChooseSomethingElse: () => void;
   onDecision: (
-    id: string,
+    recommendation: PlanRecommendation,
     decision: "accepted" | "rejected" | "dismissed",
   ) => void;
 }) {
@@ -765,7 +777,7 @@ function EvaluatedTodayView({
                     key={item.id}
                     recommendation={item}
                     unit={unit}
-                    decision={decisions[item.id]}
+                    decision={latestRecommendationDecision(item.id, decisions)}
                     onDecision={onDecision}
                   />
                 ))
@@ -829,7 +841,7 @@ function RecommendationRow({
   unit?: WeightUnit;
   decision?: string;
   onDecision: (
-    id: string,
+    recommendation: PlanRecommendation,
     decision: "accepted" | "rejected" | "dismissed",
   ) => void;
 }) {
@@ -875,17 +887,17 @@ function RecommendationRow({
         ) : decision === "accepted" ? (
           <>
             <span className="recommendation-status accepted">Accepted</span>
-            <button onClick={() => onDecision(recommendation.id, "dismissed")}>Keep plan</button>
+            <button onClick={() => onDecision(recommendation, "dismissed")}>Keep plan</button>
           </>
         ) : decision === "dismissed" ? (
           <>
             <span className="recommendation-status dismissed">Keeping plan</span>
-            <button onClick={() => onDecision(recommendation.id, "accepted")}>Accept</button>
+            <button onClick={() => onDecision(recommendation, "accepted")}>Accept</button>
           </>
         ) : (
           <>
-            <button onClick={() => onDecision(recommendation.id, "accepted")}>Accept</button>
-            <button onClick={() => onDecision(recommendation.id, "dismissed")}>Keep plan</button>
+            <button onClick={() => onDecision(recommendation, "accepted")}>Accept</button>
+            <button onClick={() => onDecision(recommendation, "dismissed")}>Keep plan</button>
           </>
         )}
       </div>
