@@ -168,6 +168,11 @@ export type WorkoutFindingCategory = 'muscle-coverage' | 'volume' | 'redundancy'
 export type WorkoutFindingSeverity = 'info' | 'warning' | 'critical'
 export interface WorkoutFinding { category: WorkoutFindingCategory; severity: WorkoutFindingSeverity; title: string; description: string; evidence: string[] }
 export interface WorkoutEvaluation { plannedSets: number; estimatedMinutes: number; primaryMuscleSets: Record<string, number>; secondaryMuscles: string[]; movementPatterns: MovementPattern[]; findings: WorkoutFinding[] }
+export interface Split { id: string; name: string; workoutIds: string[]; intendedFrequency?: number; notes?: string }
+export interface Program { id: string; name: string; splitId: string; goalIds?: string[]; notes?: string }
+export interface SplitFinding { category: 'frequency' | 'volume' | 'recovery' | 'redundancy' | 'distribution' | 'goal-alignment' | 'structure'; severity: 'info' | 'warning'; title: string; description: string; evidence: string[] }
+export interface SplitMuscleSummary { muscle: string; workoutCount: number; plannedWorkingSets: number }
+export interface SplitEvaluation { splitId: string; workouts: WorkoutEvaluation[]; muscleSummary: SplitMuscleSummary[]; findings: SplitFinding[]; overallAssessment: 'balanced' | 'some concentration' | 'potential recovery overlap' | 'insufficient information' }
 
 export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY'
 

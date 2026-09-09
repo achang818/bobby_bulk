@@ -216,6 +216,8 @@ function EvaluatedTodayView({ plan, exerciseIds, setTargets, recommendations, de
     const workoutHealth = evaluateWorkout(plan, exercises, todaysContext);
     const changes = recommendations.filter((recommendation) => recommendation.type !== "KEEP").slice(0, 4);
     useEffect(() => {
+        document.querySelectorAll(".fatigue-indicator").forEach((element) => { element.textContent = element.textContent?.replace("Fatigue", "Recent workload") ?? "Recent workload"; });
+        document.querySelectorAll(".brief-row span").forEach((element) => { if (element.textContent === "Estimated fatigue") element.textContent = "Recent workload"; });
         const column = document.querySelector(".side-column");
         if (!column) return;
         const panel = document.createElement("section");
