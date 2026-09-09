@@ -19,8 +19,34 @@ export function loadWorkouts(): Workout[] {
   return workouts
 }
 
+export function mergeWorkoutSessions(workouts: Workout[]): Workout[] {
+  const merged = new Map<string, Workout>()
+  for (const workout of workouts) {
+    const key = `${workout.date}|${workout.title.trim().toLowerCase()}`
+    const existing = merged.get(key)
+    if (!existing) {
+      merged.set(key, { ...workout, sets: [...workout.sets] })
+      continue
+    }
+    merged.set(key, {
+      ...existing,
+      status: existing.status === 'completed' || workout.status === 'completed' ? 'completed' : existing.status ?? workout.status,
+      completedAt: [existing.completedAt, workout.completedAt].filter(Boolean).sort().at(-1),
+      plannedExercises: existing.plannedExercises?.length ? existing.plannedExercises : workout.plannedExercises,
+      sets: [...existing.sets, ...workout.sets],
+    })
+  }
+  return [...merged.values()]
+}
+
 export function saveWorkout(workout: Workout, existingWorkouts = loadWorkouts()): Workout[] {
   const workouts = [workout, ...existingWorkouts]
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
+  return workouts
+}
+
+export function updateWorkout(workout: Workout, existingWorkouts = loadWorkouts()): Workout[] {
+  const workouts = existingWorkouts.map((item) => item.id === workout.id ? workout : item)
   localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
   return workouts
 }

@@ -108,6 +108,7 @@ function normalizeLoggedSet(set: Partial<LoggedSet>): LoggedSet {
     exerciseId: set.exerciseId ?? '',
     setType: set.setType ?? 'working' as SetType,
     weight: set.weight ?? 0,
+    ...(set.loadType === undefined ? {} : { loadType: set.loadType }),
     reps: set.reps ?? 0,
     ...(set.rir === undefined ? {} : { rir: set.rir }),
     ...(set.rpe === undefined ? {} : { rpe: set.rpe }),

@@ -1,4 +1,4 @@
-import type { WeightUnit } from './models'
+import type { LoggedSet, WeightUnit } from './models'
 
 const KG_TO_LB = 2.2046226218
 
@@ -9,6 +9,13 @@ export function convertWeight(weight: number, from: WeightUnit, to: WeightUnit):
 
 export function displayWeight(weight: number, from: WeightUnit | undefined, to: WeightUnit): number {
   return roundWeight(convertWeight(weight, from ?? to, to))
+}
+
+export function effectiveLoad(set: LoggedSet, bodyweightLb?: number): number {
+  if (set.loadType === 'bodyweight') return bodyweightLb ?? 0
+  if (set.loadType === 'weighted-bodyweight') return (bodyweightLb ?? 0) + set.weight
+  if (set.loadType === 'assisted') return Math.max(0, (bodyweightLb ?? 0) - set.weight)
+  return set.weight
 }
 
 function roundWeight(weight: number): number {

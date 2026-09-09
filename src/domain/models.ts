@@ -42,6 +42,7 @@ export interface LoggedSet {
   exerciseId: string
   setType: SetType
   weight: number
+  loadType?: 'external' | 'bodyweight' | 'weighted-bodyweight' | 'assisted'
   reps: number
   rir?: number
   rpe?: number
@@ -108,6 +109,7 @@ export interface UserPreferences {
   dislikedExerciseIds: string[]
   availableEquipment: string[]
   defaultGymId?: string
+  bodyweightLb?: number
 }
 
 export type ExerciseProgressState = 'progressing' | 'stable' | 'stalled' | 'regressing' | 'insufficient history'
@@ -195,5 +197,7 @@ export interface Recommendation {
   sets: number
   repRange: { min: number; max: number }
   action: 'progress-reps' | 'increase-weight' | 'start-here'
+  /** A small, explainable summary of prescription completion and effort evidence. */
+  confidence?: 'high' | 'medium' | 'low'
   reasons: string[]
 }
