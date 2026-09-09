@@ -1,6 +1,6 @@
 import { exercises } from './exercises'
 import { normalizeWorkoutSession, normalizeWorkoutTemplate } from './workout-session'
-import type { Gym, PlanRecommendation, RecommendationDecision, RecommendationDecisionType, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
+import type { Gym, PlanRecommendation, Program, RecommendationDecision, RecommendationDecisionType, Split, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
 import { defaultPreferences } from './preferences'
 
 const STORAGE_KEY = 'bobby-bulk-workouts'
@@ -10,6 +10,8 @@ const PREFERENCES_KEY = 'bobby-bulk-preferences'
 const DECISIONS_KEY = 'bobby-bulk-recommendation-decisions'
 const GYMS_KEY = 'bobby-bulk-gyms'
 const TODAYS_CONTEXT_KEY = 'bobby-bulk-todays-context'
+const SPLITS_KEY = 'bobby-bulk-splits'
+const PROGRAMS_KEY = 'bobby-bulk-programs'
 
 export function loadWorkouts(): Workout[] {
   const stored = localStorage.getItem(STORAGE_KEY)
@@ -93,6 +95,40 @@ export function deletePlan(planId: string): WorkoutTemplate[] {
   return plans
 }
 
+export function loadSplits(): Split[] {
+  const parsed = JSON.parse(localStorage.getItem(SPLITS_KEY) ?? '[]') as unknown
+  return Array.isArray(parsed) ? parsed.filter(isSplit) : []
+}
+
+export function saveSplit(split: Split): Split[] {
+  const splits = [split, ...loadSplits().filter((item) => item.id !== split.id)]
+  localStorage.setItem(SPLITS_KEY, JSON.stringify(splits))
+  return splits
+}
+
+export function deleteSplit(splitId: string): Split[] {
+  const splits = loadSplits().filter((split) => split.id !== splitId)
+  localStorage.setItem(SPLITS_KEY, JSON.stringify(splits))
+  return splits
+}
+
+export function loadPrograms(): Program[] {
+  const parsed = JSON.parse(localStorage.getItem(PROGRAMS_KEY) ?? '[]') as unknown
+  return Array.isArray(parsed) ? parsed.filter(isProgram) : []
+}
+
+export function saveProgram(program: Program): Program[] {
+  const programs = [program, ...loadPrograms().filter((item) => item.id !== program.id)]
+  localStorage.setItem(PROGRAMS_KEY, JSON.stringify(programs))
+  return programs
+}
+
+export function deleteProgram(programId: string): Program[] {
+  const programs = loadPrograms().filter((program) => program.id !== programId)
+  localStorage.setItem(PROGRAMS_KEY, JSON.stringify(programs))
+  return programs
+}
+
 export function loadPreferences(): UserPreferences {
   const stored = localStorage.getItem(PREFERENCES_KEY)
   return stored ? { ...defaultPreferences, ...(JSON.parse(stored) as Partial<UserPreferences>) } : defaultPreferences
@@ -142,4 +178,16 @@ export function loadRecommendationDecisions(): RecommendationDecision[] {
 
 export function latestRecommendationDecision(recommendationId: string, decisions: RecommendationDecision[]): RecommendationDecisionType | undefined {
   return [...decisions].reverse().find((item) => item.recommendationId === recommendationId)?.decision
+}
+
+function isSplit(value: unknown): value is Split {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<Split>
+  return typeof candidate.id === 'string' && typeof candidate.name === 'string' && Array.isArray(candidate.workoutIds) && candidate.workoutIds.every((id) => typeof id === 'string')
+}
+
+function isProgram(value: unknown): value is Program {
+  if (!value || typeof value !== 'object') return false
+  const candidate = value as Partial<Program>
+  return typeof candidate.id === 'string' && typeof candidate.name === 'string' && typeof candidate.splitId === 'string'
 }

@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest'
-import { mergeWorkoutSessions } from '../domain/storage'
-import type { Workout } from '../domain/models'
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { deleteProgram, deleteSplit, loadPrograms, loadSplits, mergeWorkoutSessions, saveProgram, saveSplit } from '../domain/storage'
+import type { Program, Split, Workout } from '../domain/models'
 
 const workout = (id: string, date: string, title: string, exerciseId: string): Workout => ({
   id, date, title, unit: 'lb', status: 'completed',
@@ -24,5 +24,37 @@ describe('workout history normalization', () => {
       workout('later-push', '2026-08-15', 'Push', 'barbell-bench-press'),
     ])
     expect(merged).toHaveLength(3)
+  })
+})
+
+const storage = new Map<string, string>()
+beforeEach(() => {
+  storage.clear()
+  vi.stubGlobal('localStorage', {
+    getItem: (key: string) => storage.get(key) ?? null,
+    setItem: (key: string, value: string) => storage.set(key, value),
+    removeItem: (key: string) => storage.delete(key),
+    clear: () => storage.clear(),
+  })
+})
+
+describe('program and split storage', () => {
+  it('round-trips valid program/split records and can delete them', () => {
+    localStorage.clear()
+    const split: Split = { id: 'split-1', name: 'Upper / lower', workoutIds: ['upper', 'lower'] }
+    const program: Program = { id: 'program-1', name: 'Strength block', splitId: split.id }
+    expect(saveSplit(split)).toEqual([split])
+    expect(saveProgram(program)).toEqual([program])
+    expect(loadSplits()).toEqual([split])
+    expect(loadPrograms()).toEqual([program])
+    expect(deleteSplit(split.id)).toEqual([])
+    expect(deleteProgram(program.id)).toEqual([])
+  })
+
+  it('ignores malformed persisted program/split data', () => {
+    localStorage.setItem('bobby-bulk-splits', JSON.stringify([{ id: 'bad', name: 'Bad', workoutIds: [7] }]))
+    localStorage.setItem('bobby-bulk-programs', JSON.stringify([{ id: 'bad', name: 'Bad' }]))
+    expect(loadSplits()).toEqual([])
+    expect(loadPrograms()).toEqual([])
   })
 })

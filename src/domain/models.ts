@@ -170,9 +170,16 @@ export interface WorkoutFinding { category: WorkoutFindingCategory; severity: Wo
 export interface WorkoutEvaluation { plannedSets: number; estimatedMinutes: number; primaryMuscleSets: Record<string, number>; secondaryMuscles: string[]; movementPatterns: MovementPattern[]; findings: WorkoutFinding[] }
 export interface Split { id: string; name: string; workoutIds: string[]; intendedFrequency?: number; notes?: string }
 export interface Program { id: string; name: string; splitId: string; goalIds?: string[]; notes?: string }
-export interface SplitFinding { category: 'frequency' | 'volume' | 'recovery' | 'redundancy' | 'distribution' | 'goal-alignment' | 'structure'; severity: 'info' | 'warning'; title: string; description: string; evidence: string[] }
+export interface SplitFinding { category: 'frequency' | 'volume' | 'recovery' | 'redundancy' | 'distribution' | 'complementarity' | 'goal-alignment' | 'structure'; severity: 'info' | 'warning'; title: string; description: string; evidence: string[] }
 export interface SplitMuscleSummary { muscle: string; workoutCount: number; plannedWorkingSets: number }
-export interface SplitEvaluation { splitId: string; workouts: WorkoutEvaluation[]; muscleSummary: SplitMuscleSummary[]; findings: SplitFinding[]; overallAssessment: 'balanced' | 'some concentration' | 'potential recovery overlap' | 'insufficient information' }
+export interface SplitAssessment {
+  distribution: 'balanced' | 'concentrated' | 'insufficient information'
+  recovery: 'spaced' | 'potential overlap' | 'insufficient information'
+  redundancy: 'varied' | 'repeated stimulus' | 'insufficient information'
+  complementarity: 'complementary' | 'substantially overlapping' | 'insufficient information'
+  goalAlignment: 'aligned' | 'limited' | 'not assessed'
+}
+export interface SplitEvaluation { splitId: string; workouts: WorkoutEvaluation[]; muscleSummary: SplitMuscleSummary[]; findings: SplitFinding[]; overallAssessment: SplitAssessment }
 
 export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY'
 

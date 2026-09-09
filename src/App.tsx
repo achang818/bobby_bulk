@@ -8,6 +8,7 @@ import { adaptWorkout, adaptWorkoutForTime } from "./domain/adaptation";
 import { classifyFatigue } from "./domain/states";
 import { calculateExerciseFeatures, comparePlannedVsActual } from "./domain/features";
 import { evaluateWorkout } from "./domain/workout-evaluator";
+import { evaluateSplit } from "./domain/split-evaluator";
  import { loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
 import { completeWorkoutSession, createPlannedExercise, createWorkoutSession, planExerciseIds, resolveWorkoutForToday } from "./domain/workout-session";
@@ -454,6 +455,45 @@ function PlansView({ plans, onSave, onStart, onDelete, }: {
     }
     const emptyWorkoutPlan: WorkoutTemplate = { ...emptyPlan, id: "empty-workout", name: "Empty workout", description: "Log any exercises you choose without changing a saved plan.", focus: "Manual logging" };
     const allPlans = [emptyWorkoutPlan, ...plans, ...workoutTemplates.filter((template) => !plans.some((plan) => plan.id === template.id)),];
+    const splitEvaluation = useMemo(() => evaluateSplit({ id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) }, plans, exercises), [plans]);
+    useEffect(() => {
+        const container = document.querySelector(".saved-plans");
+        if (!container)
+            return;
+        const panel = document.createElement("section");
+        panel.className = "split-summary";
+        const assessment = splitEvaluation.overallAssessment;
+        const coverage = splitEvaluation.muscleSummary.slice(0, 4).map((item) => `${item.muscle} ${item.plannedWorkingSets}`).join(" · ");
+        const headline = planCountLabel(plans.length);
+        const observations = splitEvaluation.findings.slice(0, 2);
+        const eyebrow = document.createElement("p");
+        eyebrow.className = "eyebrow";
+        eyebrow.textContent = "Split overview";
+        const title = document.createElement("h3");
+        title.textContent = headline;
+        const copy = document.createElement("p");
+        copy.className = "split-summary-copy";
+        copy.textContent = coverage || "Save two or more plans to see direct muscle coverage, overlap, and repeated stimuli.";
+        const statuses = document.createElement("div");
+        statuses.className = "split-statuses";
+        [`Distribution: ${assessment.distribution}`, `Recovery: ${assessment.recovery}`, `Variation: ${assessment.redundancy}`].forEach((label) => {
+            const status = document.createElement("span");
+            status.textContent = label;
+            statuses.append(status);
+        });
+        panel.append(eyebrow, title, copy, statuses);
+        if (observations.length) {
+            const list = document.createElement("ul");
+            observations.forEach((item) => {
+                const observation = document.createElement("li");
+                observation.textContent = item.title;
+                list.append(observation);
+            });
+            panel.append(list);
+        }
+        container.insertBefore(panel, container.children[1] ?? null);
+        return () => panel.remove();
+    }, [plans.length, splitEvaluation]);
     return (<>      <section className="page-intro compact">        <div>          <p className="eyebrow">Your training system</p>          <h1>Plans</h1>          <p className="lede">            Create the days you want to repeat. Bobby will keep the history and            progression underneath.          </p>        </div>      </section>      <div className="plan-builder-layout">        <section className="plan-builder">          <div className="section-heading">            <div>              <p className="eyebrow">New plan</p>              <h2>Build your own day</h2>            </div>            <span className="plan-count">{selectedIds.length} exercises</span>          </div>          <div className="input-row">            <label>              Plan name              <input value={name} onChange={(event) => setName(event.target.value)} placeholder="e.g. Pull day"/>            </label>            <label>              Focus              <input value={focus} onChange={(event) => setFocus(event.target.value)} placeholder="e.g. Back · Biceps"/>            </label>          </div>          <label className="add-exercise-label">            Add an exercise            <select value={exerciseToAdd} onChange={(event) => setExerciseToAdd(event.target.value)}>              {exercises.map((exercise) => (<option key={exercise.id} value={exercise.id}>                  {exercise.name}                </option>))}            </select>          </label>          <button className="secondary-button" onClick={addExercise}>            ＋ Add to plan          </button>          <div className="builder-list">            {selectedIds.length === 0 ? (<p className="empty-state">                Your plan is empty. Add the movements you want to train.              </p>) : (selectedIds.map((id, index) => {
             const exercise = exercises.find((item) => item.id === id);
             return exercise ? (<div className="builder-row" key={id}>                    <span>{String(index + 1).padStart(2, "0")}</span>                    <strong>{exercise.name}</strong>                    <small>                      {exercise.defaultSets} sets · {exercise.repRange.min}–                      {exercise.repRange.max}                    </small>                    <button onClick={() => setSelectedIds((current) => current.filter((item) => item !== id))} aria-label={`Remove ${exercise.name}`}>                      ×                    </button>                  </div>) : null;
@@ -461,6 +501,9 @@ function PlansView({ plans, onSave, onStart, onDelete, }: {
                     if (window.confirm(`Delete ${plan.name}?`))
                         onDelete(plan.id);
                 }} aria-label={`Delete ${plan.name}`}>                    ×                  </button>)}              </div>            </article>))}        </aside>      </div>    </>);
+}
+function planCountLabel(count: number) {
+    return count === 0 ? "No saved plans yet" : count === 1 ? "1 saved plan" : `${count} saved plans`;
 }
 function formatDate(date: string) {
     return new Date(`${date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric", });
