@@ -6,10 +6,10 @@ const DAY = 24 * 60 * 60 * 1000
 
 export function calculateExerciseFeatures(exercise: Exercise, history: Workout[], asOf = latestDate(history)): ExerciseFeatures {
   const sessions = history
-    .filter((workout) => workout.sets.some((set) => set.exerciseId === exercise.id))
+    .filter((workout) => workout.sets.some((set) => set.exerciseId === exercise.id && set.setType === 'working'))
     .sort((a, b) => a.date.localeCompare(b.date))
   const recentPerformance = sessions.map((workout) => {
-    const sets = workout.sets.filter((set) => set.exerciseId === exercise.id)
+    const sets = workout.sets.filter((set) => set.exerciseId === exercise.id && set.setType === 'working')
     return { date: workout.date, averageReps: average(sets.map((set) => set.reps)), averageWeight: average(sets.map((set) => set.weight)) }
   })
   const last = sessions.at(-1)?.date
