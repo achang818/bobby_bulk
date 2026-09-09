@@ -191,6 +191,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
     },
   },
 
+  {
+    id: 'muscle-specific-loading',
+    topic: 'Muscle-specific loading',
+    description:
+      'Exercise selection should consider the anatomical functions of the target muscle and whether the exercise meaningfully loads that muscle through an effective range of motion. When appropriate, preference can be given to exercises that provide substantial loading at longer muscle lengths.',
+    evidenceLevel: 'B',
+    source: {
+      name: 'ACSM Resistance Training Position Stand',
+      year: 2026,
+    },
+  },
+
   // ===========================================================================
   // EXERCISE VARIATION
   // ===========================================================================

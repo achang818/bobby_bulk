@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useMemo, useState } from "react";
 import "./App.css";
 import { exercises } from "./domain/exercises";
 import { sampleWorkouts } from "./domain/seed";
@@ -38,6 +38,7 @@ import type {
 } from "./domain/models";
 
 type View = "today" | "history" | "exercises" | "plans" | "goals";
+type SetInput = { weight: string; reps: string; rir: string };
 
 const defaultGym: Gym = {
   id: "default-gym",
@@ -62,9 +63,7 @@ function App() {
   });
   const [selectedExerciseId, setSelectedExerciseId] = useState(exercises[0].id);
   const [draftSets, setDraftSets] = useState<LoggedSet[]>([]);
-  const [weight, setWeight] = useState("70");
-  const [reps, setReps] = useState("8");
-  const [rir, setRir] = useState("");
+  const [setInputOverrides, setSetInputOverrides] = useState<Record<string, SetInput>>({});
   const [showLogger, setShowLogger] = useState(false);
   const [recommendationDecisions, setRecommendationDecisions] = useState<Record<string, string>>(() => loadRecommendationDecisions());
   const [activePlan, setActivePlan] = useState<WorkoutTemplate>(() => loadPlans()[0] ?? emptyPlan);
@@ -112,10 +111,9 @@ function App() {
     return [id, recommendation?.modifiedSets ?? exercise?.defaultSets ?? 0];
   })), [planRecommendations, recommendationDecisions, workoutExerciseIds]);
 
-  useEffect(() => {
-    if (!showLogger) return;
+  const initialSetInput = useMemo<SetInput>(() => {
     const exercise = exercises.find((item) => item.id === selectedExerciseId);
-    if (!exercise) return;
+    if (!exercise) return { weight: "0", reps: "0", rir: "" };
     const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && item.exerciseId === selectedExerciseId && recommendationDecisions[item.id] !== "dismissed")?.progression;
     const latestSet = [...workouts]
       .sort((a, b) => b.date.localeCompare(a.date))
@@ -124,19 +122,29 @@ function App() {
         weight: displayWeight(set.weight, workout.unit, preferences.weightUnit),
       })))
       .at(0);
-    setWeight(String(progression?.weight || latestSet?.weight || 0));
-    setReps(String(progression?.repRange.min ?? latestSet?.reps ?? exercise.repRange.min));
-    setRir("");
-  }, [planRecommendations, preferences.weightUnit, recommendationDecisions, selectedExerciseId, showLogger, workoutExerciseIds, workouts]);
+    return {
+      weight: String(progression?.weight || latestSet?.weight || 0),
+      reps: String(progression?.repRange.min ?? latestSet?.reps ?? exercise.repRange.min),
+      rir: "",
+    };
+  }, [planRecommendations, preferences.weightUnit, recommendationDecisions, selectedExerciseId, workouts]);
+  const setInput = setInputOverrides[selectedExerciseId] ?? initialSetInput;
+
+  function updateSetInput(next: Partial<SetInput>) {
+    setSetInputOverrides((current) => ({
+      ...current,
+      [selectedExerciseId]: { ...(current[selectedExerciseId] ?? initialSetInput), ...next },
+    }));
+  }
 
   function updateTodaysContext(next: TodaysContext) {
     setTodaysContext(saveTodaysContext(next));
   }
 
   function addSet() {
-    const parsedWeight = Number(weight);
-    const parsedReps = Number(reps);
-    const parsedRir = rir.trim() === "" ? undefined : Number(rir);
+    const parsedWeight = Number(setInput.weight);
+    const parsedReps = Number(setInput.reps);
+    const parsedRir = setInput.rir.trim() === "" ? undefined : Number(setInput.rir);
     if (
       !Number.isFinite(parsedWeight) ||
       !Number.isFinite(parsedReps) ||
@@ -191,6 +199,7 @@ function App() {
       .filter((id) => !adaptWorkoutForTime(plan, exercises, todaysContext.availableMinutes, planGoalCriticalIds).some((item) => item.type === "REMOVE" && item.exerciseId === id));
     setActivePlan(plan);
     setSelectedExerciseId(shortenedExerciseIds[0] ?? exercises[0].id);
+    setSetInputOverrides({});
     setDraftSets([]);
     setShowLogger(true);
   }
@@ -201,6 +210,7 @@ function App() {
       return;
     }
     setSelectedExerciseId(workoutExerciseIds[0] ?? exercises[0].id);
+    setSetInputOverrides({});
     setDraftSets([]);
     setShowLogger(true);
   }
@@ -365,15 +375,15 @@ function App() {
                       <div className="input-row">
                         <label>
                           Weight
-                          <input inputMode="decimal" value={weight} onChange={(event) => setWeight(event.target.value)} />
+                          <input inputMode="decimal" value={setInput.weight} onChange={(event) => updateSetInput({ weight: event.target.value })} />
                         </label>
                         <label>
                           Reps
-                          <input inputMode="numeric" value={reps} onChange={(event) => setReps(event.target.value)} />
+                          <input inputMode="numeric" value={setInput.reps} onChange={(event) => updateSetInput({ reps: event.target.value })} />
                         </label>
                         <label>
                           RIR
-                          <input inputMode="numeric" min="0" max="5" placeholder="Optional" value={rir} onChange={(event) => setRir(event.target.value)} />
+                          <input inputMode="numeric" min="0" max="5" placeholder="Optional" value={setInput.rir} onChange={(event) => updateSetInput({ rir: event.target.value })} />
                         </label>
                       </div>
                       <button className="secondary-button full" onClick={addSet}>

@@ -65,4 +65,13 @@ describe('time adaptation', () => {
     expect(removedIds).toContain('cable-lateral-raise')
     expect(removedIds).not.toContain('barbell-bench-press')
   })
+
+  it('supersedes a set reduction when the same exercise must be removed', () => {
+    const recommendations = adaptWorkoutForTime(timePlan, exercises, 14)
+    const modifiedIds = new Set(recommendations.filter((recommendation) => recommendation.type === 'MODIFY').map((recommendation) => recommendation.exerciseId))
+    const removedIds = recommendations.filter((recommendation) => recommendation.type === 'REMOVE').map((recommendation) => recommendation.exerciseId)
+
+    expect(removedIds).toContain('cable-lateral-raise')
+    expect(removedIds.some((exerciseId) => modifiedIds.has(exerciseId))).toBe(false)
+  })
 })

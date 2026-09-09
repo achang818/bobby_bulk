@@ -74,7 +74,8 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
     .filter((exercise): exercise is Exercise => Boolean(exercise))
   const trace = buildTrace('adapt-available-time')
   const orderedExercises = [...planExercises].sort((a, b) => protectionScore(a, goalCritical) - protectionScore(b, goalCritical))
-  const recommendations: PlanRecommendation[] = []
+  const modifications = new Map<string, PlanRecommendation>()
+  const removals: PlanRecommendation[] = []
   let minutesToSave = typicalDuration - availableMinutes
 
   for (const exercise of orderedExercises) {
@@ -83,7 +84,7 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
     if (reducibleSets === 0) continue
     const setsToRemove = Math.min(reducibleSets, Math.ceil(minutesToSave / MINUTES_PER_WORKING_SET))
     const remainingSets = exercise.defaultSets - setsToRemove
-    recommendations.push({
+    modifications.set(exercise.id, {
       id: `time-modify-${plan.id}-${exercise.id}`,
       type: 'MODIFY',
       exerciseId: exercise.id,
@@ -98,7 +99,10 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
   if (minutesToSave > 0) {
     for (const exercise of orderedExercises) {
       if (minutesToSave <= 0) break
-      recommendations.push({
+      const remainingSets = modifications.get(exercise.id)?.modifiedSets ?? exercise.defaultSets
+      // A full removal supersedes a prior set reduction for the same exercise.
+      modifications.delete(exercise.id)
+      removals.push({
         id: `time-remove-${plan.id}-${exercise.id}`,
         type: 'REMOVE',
         exerciseId: exercise.id,
@@ -106,11 +110,11 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
         reasons: [`Remove ${exercise.name} as a last resort to fit today's ${availableMinutes}-minute limit.`, exercise.type === 'isolation' ? 'Isolation work is prioritized for removal before compound work.' : 'Compound work is retained until lower-priority options are exhausted.'],
         trace,
       })
-      minutesToSave -= exercise.defaultSets * MINUTES_PER_WORKING_SET + MINUTES_PER_EXERCISE_TRANSITION
+      minutesToSave -= remainingSets * MINUTES_PER_WORKING_SET + MINUTES_PER_EXERCISE_TRANSITION
     }
   }
 
-  return recommendations
+  return [...modifications.values(), ...removals]
 }
 
 function protectionScore(exercise: Exercise, goalCritical: Set<string>) {
