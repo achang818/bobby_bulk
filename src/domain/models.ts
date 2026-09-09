@@ -12,6 +12,26 @@ export interface Exercise {
   defaultSets: number
 }
 
+export type EquipmentTag = 'dumbbells' | 'barbells' | 'cables' | 'machines' | 'benches' | 'pull-up-bar' | 'kettlebells' | 'trap-bar' | 'bodyweight' | 'other'
+
+export interface AvailableLoad {
+  equipment: EquipmentTag
+  increments: number[]
+}
+
+export interface Gym {
+  id: string
+  name: string
+  equipment: EquipmentTag[]
+  availableLoads?: AvailableLoad[]
+}
+
+export interface TodaysContext {
+  gymId: string
+  unavailableEquipment: EquipmentTag[]
+  availableMinutes?: number
+}
+
 export interface LoggedSet {
   id: string
   exerciseId: string
@@ -52,6 +72,7 @@ export interface UserPreferences {
   preferredExerciseIds: string[]
   dislikedExerciseIds: string[]
   availableEquipment: string[]
+  defaultGymId?: string
 }
 
 export type ExerciseProgressState = 'progressing' | 'stable' | 'stalled' | 'regressing' | 'insufficient history'
@@ -81,7 +102,7 @@ export interface MuscleFeatures {
   volumeState: MuscleVolumeState
 }
 
-export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE'
+export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY'
 
 export type EvidenceLevel = 'A' | 'B' | 'C' | 'D' | 'Personal'
 

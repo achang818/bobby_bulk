@@ -29,6 +29,13 @@ export const trainingPrinciples: TrainingPrinciple[] = [
     evidenceLevel: 'A',
     source: { name: 'ACSM Resistance Training Position Stand', year: 2026 },
   },
+  {
+    id: 'equipment-constraint',
+    topic: 'Adapting to unavailable equipment',
+    description: 'When equipment is unavailable, preserve the planned movement category and primary muscle targets with the closest practical substitute.',
+    evidenceLevel: 'C',
+    source: { name: 'Practical coaching heuristic', year: 2026 },
+  },
 ]
 
 export function findPrinciple(id: string): TrainingPrinciple {

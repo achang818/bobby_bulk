@@ -4,17 +4,22 @@ import { exercises } from "./domain/exercises";
 import { sampleWorkouts } from "./domain/seed";
 import { workoutTemplates } from "./domain/templates";
 import { evaluatePlan } from "./domain/plan-evaluator";
+import { adaptWorkout } from "./domain/adaptation";
+import { classifyFatigue } from "./domain/states";
 import {
   loadPlans,
   loadPreferences,
   loadSavedTemplates,
   loadWorkouts,
+  loadGyms,
+  loadTodaysContext,
   deletePlan,
   deleteWorkout,
   savePlan,
   savePreferences,
   saveRecommendationDecision,
   saveWorkout,
+  saveTodaysContext,
   toggleSavedTemplate,
 } from "./domain/storage";
 import { displayWeight } from "./domain/units";
@@ -26,9 +31,20 @@ import type {
   WeightUnit,
   Workout,
   WorkoutTemplate,
+  EquipmentTag,
+  Gym,
+  TodaysContext,
 } from "./domain/models";
 
 type View = "today" | "history" | "exercises" | "plans" | "goals";
+
+const defaultGym: Gym = {
+  id: "default-gym",
+  name: "Default gym",
+  equipment: ["dumbbells", "barbells", "cables", "machines", "benches", "pull-up-bar"],
+  availableLoads: [{ equipment: "dumbbells", increments: [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70] }],
+};
+const equipmentOptions: EquipmentTag[] = ["dumbbells", "barbells", "cables", "machines", "benches", "pull-up-bar"];
 
 function App() {
   const [view, setView] = useState<View>("today");
@@ -48,10 +64,22 @@ function App() {
   const [preferences, setPreferences] = useState<UserPreferences>(() =>
     loadPreferences(),
   );
-  const planRecommendations = useMemo(
-    () => evaluatePlan(activePlan, exercises, workouts, preferences),
-    [activePlan, preferences, workouts],
+  const [gyms] = useState<Gym[]>(() => {
+    const saved = loadGyms();
+    return saved.length > 0 ? saved : [defaultGym];
+  });
+  const [todaysContext, setTodaysContext] = useState<TodaysContext>(() =>
+    loadTodaysContext({ gymId: preferences.defaultGymId ?? defaultGym.id, unavailableEquipment: [] }),
   );
+  const currentGym = gyms.find((gym) => gym.id === todaysContext.gymId) ?? gyms[0] ?? defaultGym;
+  const planRecommendations = useMemo(
+    () => [...evaluatePlan(activePlan, exercises, workouts, preferences, undefined, currentGym.availableLoads), ...adaptWorkout(activePlan, exercises, todaysContext, preferences)].sort((a, b) => b.score - a.score),
+    [activePlan, currentGym.availableLoads, preferences, todaysContext, workouts],
+  );
+
+  function updateTodaysContext(next: TodaysContext) {
+    setTodaysContext(saveTodaysContext(next));
+  }
 
   function addSet() {
     const parsedWeight = Number(weight);
@@ -160,6 +188,10 @@ function App() {
             recommendations={planRecommendations}
             workouts={workouts}
             unit={preferences.weightUnit}
+            gyms={gyms}
+            todaysContext={todaysContext}
+            fatigue={classifyFatigue(workouts)}
+            onContextChange={updateTodaysContext}
             onLog={() => startPlan(activePlan)}
             onDecision={(id, decision) =>
               saveRecommendationDecision(id, decision)
@@ -466,6 +498,10 @@ function EvaluatedTodayView({
   recommendations,
   workouts,
   unit,
+  gyms,
+  todaysContext,
+  fatigue,
+  onContextChange,
   onLog,
   onDecision,
 }: {
@@ -473,6 +509,10 @@ function EvaluatedTodayView({
   recommendations: PlanRecommendation[];
   workouts: Workout[];
   unit: WeightUnit;
+  gyms: Gym[];
+  todaysContext: TodaysContext;
+  fatigue: "Low" | "Moderate" | "High";
+  onContextChange: (context: TodaysContext) => void;
   onLog: () => void;
   onDecision: (
     id: string,
@@ -505,6 +545,7 @@ function EvaluatedTodayView({
             <span className="confidence">
               {recommendations.length} observations
             </span>
+            <span className="fatigue-indicator">Fatigue {fatigue}</span>
           </div>
           <div className="recommendation-main">
             <div>
@@ -533,6 +574,39 @@ function EvaluatedTodayView({
                 </div>
               ) : null;
             })}
+          </div>
+          <div className="context-controls">
+            <div className="context-heading">
+              <strong>Today's context</strong>
+              <span>Temporary changes only</span>
+            </div>
+            <label className="context-select">
+              Gym
+              <select
+                value={todaysContext.gymId}
+                onChange={(event) => onContextChange({ ...todaysContext, gymId: event.target.value })}
+              >
+                {gyms.map((gym) => <option key={gym.id} value={gym.id}>{gym.name}</option>)}
+              </select>
+            </label>
+            <fieldset className="equipment-options">
+              <legend>Equipment unavailable</legend>
+              {(gyms.find((gym) => gym.id === todaysContext.gymId)?.equipment ?? equipmentOptions).map((equipment) => (
+                <label key={equipment}>
+                  <input
+                    type="checkbox"
+                    checked={todaysContext.unavailableEquipment.includes(equipment)}
+                    onChange={() => onContextChange({
+                      ...todaysContext,
+                      unavailableEquipment: todaysContext.unavailableEquipment.includes(equipment)
+                        ? todaysContext.unavailableEquipment.filter((item) => item !== equipment)
+                        : [...todaysContext.unavailableEquipment, equipment],
+                    })}
+                  />
+                  {equipment.replace("-", " ")}
+                </label>
+              ))}
+            </fieldset>
           </div>
           <div className="why-box">
             <div className="why-title">

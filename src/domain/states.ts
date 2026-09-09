@@ -1,4 +1,6 @@
-import type { ExerciseProgressState, MuscleVolumeState, PreferenceState } from './models'
+import type { ExerciseProgressState, MuscleVolumeState, PreferenceState, Workout } from './models'
+
+export type FatigueLevel = 'Low' | 'Moderate' | 'High'
 
 export function classifyExerciseProgression(performance: { averageReps: number }[]): ExerciseProgressState {
   if (performance.length < 2) return 'insufficient history'
@@ -23,3 +25,14 @@ export function classifyPreference(exerciseId: string, preferences: { preferredE
   if (preferences.dislikedExerciseIds.includes(exerciseId)) return 'disliked'
   return 'neutral'
 }
+
+export function classifyFatigue(recentSessions: Workout[], asOf = latestDate(recentSessions)): FatigueLevel {
+  const recentSets = recentSessions.filter((session) => daysBetween(session.date, asOf) <= 7 && daysBetween(session.date, asOf) >= 0).reduce((total, session) => total + session.sets.length, 0)
+  const typicalWeeklySets = recentSessions.filter((session) => daysBetween(session.date, asOf) <= 28 && daysBetween(session.date, asOf) >= 0).reduce((total, session) => total + session.sets.length, 0) / 4
+  if (typicalWeeklySets === 0 || recentSets <= typicalWeeklySets * 1.15) return 'Low'
+  if (recentSets <= typicalWeeklySets * 1.5) return 'Moderate'
+  return 'High'
+}
+
+function latestDate(history: Workout[]) { return history.map((workout) => workout.date).sort().at(-1) ?? new Date().toISOString().slice(0, 10) }
+function daysBetween(start: string, end: string) { return Math.max(0, Math.floor((Date.parse(`${end}T12:00:00`) - Date.parse(`${start}T12:00:00`)) / (24 * 60 * 60 * 1000))) }

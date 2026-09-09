@@ -6,6 +6,7 @@ export const decisionRules = {
   'keep-stable-exercise': 'consistent-execution',
   'replace-on-stall': 'plateau-variation',
   'add-for-priority-volume': 'volume-hypertrophy',
+  'adapt-unavailable-equipment': 'equipment-constraint',
 } as const
 
 export type DecisionRuleId = keyof typeof decisionRules

@@ -1,8 +1,9 @@
-import type { Exercise, LoggedSet, Recommendation, Workout } from './models'
+import type { AvailableLoad, Exercise, LoggedSet, Recommendation, Workout } from './models'
 
 export function recommendNext(
   exercise: Exercise,
   history: Workout[],
+  availableLoads?: AvailableLoad[],
 ): Recommendation {
   const sets = history
     .flatMap((workout) => workout.sets)
@@ -27,7 +28,7 @@ export function recommendNext(
   if (allAtTop) {
     return {
       exercise,
-      weight: roundWeight(weight + weightIncrement(weight)),
+      weight: roundWeight(weight + weightIncrement(weight, exercise, availableLoads)),
       sets: exercise.defaultSets,
       repRange: exercise.repRange,
       action: 'increase-weight',
@@ -62,9 +63,26 @@ function latestSets(
   return latestWorkout ? latestWorkout.sets.filter((set) => set.exerciseId === exerciseId) : sets
 }
 
-function weightIncrement(weight: number): number {
+function weightIncrement(weight: number, exercise: Exercise, availableLoads?: AvailableLoad[]): number {
+  const load = availableLoads?.find((item) => item.equipment === equipmentTagFor(exercise.equipment))
+  if (load?.increments.length) {
+    const next = load.increments.find((increment) => increment > weight)
+    return next === undefined ? 0 : next - weight
+  }
   if (weight <= 0) return 5
   return weight < 50 ? 2.5 : 5
+}
+
+function equipmentTagFor(equipment: string) {
+  const normalized = equipment.toLowerCase()
+  if (normalized.includes('dumbbell')) return 'dumbbells' as const
+  if (normalized.includes('barbell')) return 'barbells' as const
+  if (normalized.includes('cable')) return 'cables' as const
+  if (normalized.includes('machine')) return 'machines' as const
+  if (normalized.includes('kettlebell')) return 'kettlebells' as const
+  if (normalized.includes('trap bar')) return 'trap-bar' as const
+  if (normalized.includes('bodyweight')) return 'bodyweight' as const
+  return 'other' as const
 }
 
 function roundWeight(weight: number): number {

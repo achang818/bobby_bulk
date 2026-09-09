@@ -1,4 +1,4 @@
-import type { UserPreferences, Workout, WorkoutTemplate } from './models'
+import type { Gym, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
 import { defaultPreferences } from './preferences'
 
 const STORAGE_KEY = 'bobby-bulk-workouts'
@@ -6,6 +6,8 @@ const TEMPLATE_KEY = 'bobby-bulk-templates'
 const PLAN_KEY = 'bobby-bulk-plans'
 const PREFERENCES_KEY = 'bobby-bulk-preferences'
 const DECISIONS_KEY = 'bobby-bulk-recommendation-decisions'
+const GYMS_KEY = 'bobby-bulk-gyms'
+const TODAYS_CONTEXT_KEY = 'bobby-bulk-todays-context'
 
 export function loadWorkouts(): Workout[] {
   const stored = localStorage.getItem(STORAGE_KEY)
@@ -62,6 +64,26 @@ export function loadPreferences(): UserPreferences {
 export function savePreferences(preferences: UserPreferences): UserPreferences {
   localStorage.setItem(PREFERENCES_KEY, JSON.stringify(preferences))
   return preferences
+}
+
+export function loadGyms(): Gym[] {
+  const stored = localStorage.getItem(GYMS_KEY)
+  return stored ? (JSON.parse(stored) as Gym[]) : []
+}
+
+export function saveGyms(gyms: Gym[]): Gym[] {
+  localStorage.setItem(GYMS_KEY, JSON.stringify(gyms))
+  return gyms
+}
+
+export function loadTodaysContext(defaultContext: TodaysContext): TodaysContext {
+  const stored = localStorage.getItem(TODAYS_CONTEXT_KEY)
+  return stored ? { ...defaultContext, ...(JSON.parse(stored) as Partial<TodaysContext>) } : defaultContext
+}
+
+export function saveTodaysContext(context: TodaysContext): TodaysContext {
+  localStorage.setItem(TODAYS_CONTEXT_KEY, JSON.stringify(context))
+  return context
 }
 
 export function saveRecommendationDecision(recommendationId: string, decision: 'accepted' | 'rejected' | 'dismissed'): Record<string, string> {

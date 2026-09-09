@@ -34,6 +34,17 @@ describe('recommendNext', () => {
     expect(recommendNext(bench, [workout]).weight).toBe(75)
   })
 
+  it('uses the gym load increments instead of inventing an unavailable load', () => {
+    const workout: Workout = {
+      id: 'w1', date: '2026-09-01', title: 'Upper', sets: [
+        { id: '1', exerciseId: bench.id, weight: 70, reps: 10 },
+        { id: '2', exerciseId: bench.id, weight: 70, reps: 10 },
+        { id: '3', exerciseId: bench.id, weight: 70, reps: 10 },
+      ],
+    }
+    expect(recommendNext(bench, [workout], [{ equipment: 'dumbbells', increments: [65, 70] }]).weight).toBe(70)
+  })
+
   it('ignores optional timing and RIR when they are missing', () => {
     const workout: Workout = {
       id: 'w1', date: '2026-09-01', title: 'Upper', sets: [

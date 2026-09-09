@@ -2,15 +2,15 @@ import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { recommendNext } from './progression'
 import { buildTrace } from './rules'
 import { classifyPreference } from './states'
-import type { Exercise, PlanRecommendation, UserPreferences, Workout, WorkoutPlan } from './models'
+import type { AvailableLoad, Exercise, PlanRecommendation, UserPreferences, Workout, WorkoutPlan } from './models'
 
-export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string): PlanRecommendation[] {
+export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[]): PlanRecommendation[] {
   const recommendations: PlanRecommendation[] = []
   const planExercises = plan.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)).filter((exercise): exercise is Exercise => Boolean(exercise))
 
   for (const exercise of planExercises) {
     const features = calculateExerciseFeatures(exercise, history, asOf)
-    const progression = recommendNext(exercise, history)
+    const progression = recommendNext(exercise, history, availableLoads)
     const goalAligned = preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number]))
     const preferenceState = classifyPreference(exercise.id, preferences)
     if (features.sessionsPerformed > 0 && progression.action !== 'start-here') {
