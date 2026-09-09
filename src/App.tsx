@@ -56,6 +56,7 @@ function App() {
   const [draftSets, setDraftSets] = useState<LoggedSet[]>([]);
   const [weight, setWeight] = useState("70");
   const [reps, setReps] = useState("8");
+  const [rir, setRir] = useState("");
   const [showLogger, setShowLogger] = useState(false);
   const [activePlan, setActivePlan] = useState<WorkoutTemplate>(
     workoutTemplates[0],
@@ -76,6 +77,10 @@ function App() {
     () => [...evaluatePlan(activePlan, exercises, workouts, preferences, undefined, currentGym.availableLoads), ...adaptWorkout(activePlan, exercises, todaysContext, preferences)].sort((a, b) => b.score - a.score),
     [activePlan, currentGym.availableLoads, preferences, todaysContext, workouts],
   );
+  const adaptedPlanExerciseIds = useMemo(() => activePlan.exerciseIds.map((id) => {
+    const recommendation = planRecommendations.find((item) => item.type === "REPLACE" && item.exerciseId === id && item.alternativeExerciseId);
+    return recommendation?.alternativeExerciseId ?? id;
+  }), [activePlan.exerciseIds, planRecommendations]);
 
   function updateTodaysContext(next: TodaysContext) {
     setTodaysContext(saveTodaysContext(next));
@@ -84,10 +89,12 @@ function App() {
   function addSet() {
     const parsedWeight = Number(weight);
     const parsedReps = Number(reps);
+    const parsedRir = rir.trim() === "" ? undefined : Number(rir);
     if (
       !Number.isFinite(parsedWeight) ||
       !Number.isFinite(parsedReps) ||
-      parsedReps <= 0
+      parsedReps <= 0 ||
+      (parsedRir !== undefined && (!Number.isFinite(parsedRir) || parsedRir < 0 || parsedRir > 5))
     )
       return;
     setDraftSets((current) => [
@@ -97,6 +104,7 @@ function App() {
         exerciseId: selectedExerciseId,
         weight: parsedWeight,
         reps: parsedReps,
+        ...(parsedRir === undefined ? {} : { rir: parsedRir }),
       },
     ]);
   }
@@ -119,6 +127,12 @@ function App() {
   function startPlan(plan: WorkoutTemplate) {
     setActivePlan(plan);
     setSelectedExerciseId(plan.exerciseIds[0] ?? exercises[0].id);
+    setDraftSets([]);
+    setShowLogger(true);
+  }
+
+  function startRecommendedWorkout() {
+    setSelectedExerciseId(adaptedPlanExerciseIds[0] ?? exercises[0].id);
     setDraftSets([]);
     setShowLogger(true);
   }
@@ -192,7 +206,7 @@ function App() {
             todaysContext={todaysContext}
             fatigue={classifyFatigue(workouts)}
             onContextChange={updateTodaysContext}
-            onLog={() => startPlan(activePlan)}
+            onLog={startRecommendedWorkout}
             onDecision={(id, decision) =>
               saveRecommendationDecision(id, decision)
             }
@@ -247,7 +261,7 @@ function App() {
               </button>
             </div>
             <div className="plan-preview">
-              {activePlan.exerciseIds.map((id, index) => (
+              {adaptedPlanExerciseIds.map((id, index) => (
                 <span
                   key={id}
                   className={
@@ -261,13 +275,51 @@ function App() {
                 </span>
               ))}
             </div>
-            <label>
-              Exercise
-              <select
-                value={selectedExerciseId}
-                onChange={(event) => setSelectedExerciseId(event.target.value)}
-              >
-                {activePlan.exerciseIds.map((id) => {
+            <div className="logger-exercises">
+              {adaptedPlanExerciseIds.map((id, index) => {
+                const exercise = exercises.find((item) => item.id === id);
+                const loggedSets = draftSets.filter((set) => set.exerciseId === id);
+                if (!exercise) return null;
+                return (
+                  <article className={selectedExerciseId === id ? "logger-exercise active" : "logger-exercise"} key={id}>
+                    <button className="logger-exercise-heading" onClick={() => setSelectedExerciseId(id)}>
+                      <span className="logger-exercise-number">{String(index + 1).padStart(2, "0")}</span>
+                      <span>
+                        <strong>{exercise.name}</strong>
+                        <small>{loggedSets.length}/{exercise.defaultSets} working sets · {exercise.repRange.min}–{exercise.repRange.max} reps</small>
+                      </span>
+                      <span className="logger-exercise-state">{loggedSets.length === exercise.defaultSets ? "✓" : ""}</span>
+                    </button>
+                    {selectedExerciseId === id && <div className="logger-set-entry">
+                      {loggedSets.map((set, setIndex) => <div className="logged-set" key={set.id}><span>Set {setIndex + 1}</span><strong>{set.weight} {preferences.weightUnit} × {set.reps}</strong><span>RIR {set.rir ?? "-"}</span></div>)}
+                      <div className="input-row">
+                        <label>
+                          Weight
+                          <input inputMode="decimal" value={weight} onChange={(event) => setWeight(event.target.value)} />
+                        </label>
+                        <label>
+                          Reps
+                          <input inputMode="numeric" value={reps} onChange={(event) => setReps(event.target.value)} />
+                        </label>
+                        <label>
+                          RIR
+                          <input inputMode="numeric" min="0" max="5" placeholder="Optional" value={rir} onChange={(event) => setRir(event.target.value)} />
+                        </label>
+                      </div>
+                      <button className="secondary-button full" onClick={addSet}>✓ Log set</button>
+                    </div>}
+                  </article>
+                );
+              })}
+            </div>
+            <div className="logger-legacy-controls">
+              <label>
+                Exercise
+                <select
+                  value={selectedExerciseId}
+                  onChange={(event) => setSelectedExerciseId(event.target.value)}
+                >
+                {adaptedPlanExerciseIds.map((id) => {
                   const exercise = exercises.find((item) => item.id === id);
                   return exercise ? (
                     <option key={exercise.id} value={exercise.id}>
@@ -277,28 +329,7 @@ function App() {
                 })}
               </select>
             </label>
-            <div className="input-row">
-              <label>
-                Weight
-                <input
-                  inputMode="decimal"
-                  value={weight}
-                  onChange={(event) => setWeight(event.target.value)}
-                />
-                <span className="input-unit">{preferences.weightUnit}</span>
-              </label>
-              <label>
-                Reps
-                <input
-                  inputMode="numeric"
-                  value={reps}
-                  onChange={(event) => setReps(event.target.value)}
-                />
-              </label>
             </div>
-            <button className="secondary-button full" onClick={addSet}>
-              ＋ Add set
-            </button>
             <div className="draft-list">
               {draftSets.length === 0 ? (
                 <p className="empty-state">
@@ -365,7 +396,7 @@ export function LegacyTodayView({
     <>
       <section className="page-intro">
         <div>
-          <p className="eyebrow">Tuesday, September 8, 2026</p>
+          <p className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
           <h1>Make today count.</h1>
           <p className="lede">
             A complete session, grounded in what you actually did.
@@ -526,7 +557,7 @@ function EvaluatedTodayView({
     <>
       <section className="page-intro">
         <div>
-          <p className="eyebrow">Tuesday, September 8, 2026</p>
+          <p className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
           <h1>Make today count.</h1>
           <p className="lede">
             Your plan stays yours. Bobby highlights evidence-backed changes to
@@ -589,6 +620,17 @@ function EvaluatedTodayView({
                 {gyms.map((gym) => <option key={gym.id} value={gym.id}>{gym.name}</option>)}
               </select>
             </label>
+            <label className="context-select">
+              Available time (minutes)
+              <input
+                type="number"
+                min="10"
+                max="240"
+                placeholder="Optional"
+                value={todaysContext.availableMinutes ?? ""}
+                onChange={(event) => onContextChange({ ...todaysContext, availableMinutes: event.target.value ? Number(event.target.value) : undefined })}
+              />
+            </label>
             <fieldset className="equipment-options">
               <legend>Equipment unavailable</legend>
               {(gyms.find((gym) => gym.id === todaysContext.gymId)?.equipment ?? equipmentOptions).map((equipment) => (
@@ -639,26 +681,23 @@ function EvaluatedTodayView({
           </div>
         </div>
         <aside className="side-column">
-          <div className="mini-panel">
+          <div className="mini-panel session-brief">
             <div className="panel-title">
-              <span>Recent momentum</span>
-              <span className="trend-up">↗ +12%</span>
+              <span>Session brief</span>
             </div>
-            <div className="metric-number">
-              {workouts.length} <span>sessions</span>
+            <div className="brief-row">
+              <span>Exercises</span>
+              <strong>{plan.exerciseIds.length}</strong>
             </div>
-            <div className="mini-bars">
-              <i style={{ height: "38%" }}></i>
-              <i style={{ height: "58%" }}></i>
-              <i style={{ height: "46%" }}></i>
-              <i style={{ height: "80%" }}></i>
-              <i style={{ height: "68%" }}></i>
-              <i className="today-bar" style={{ height: "92%" }}></i>
+            <div className="brief-row">
+              <span>Planned sets</span>
+              <strong>{plan.exerciseIds.reduce((total, id) => total + (exercises.find((exercise) => exercise.id === id)?.defaultSets ?? 0), 0)}</strong>
             </div>
-            <div className="bar-labels">
-              <span>Recent</span>
-              <span>Today</span>
+            <div className="brief-row">
+              <span>Gym</span>
+              <strong>{gyms.find((gym) => gym.id === todaysContext.gymId)?.name ?? "Not set"}</strong>
             </div>
+            <p className="brief-note">Your routine is the baseline. Bobby only proposes changes where today's context or your history gives it a reason.</p>
           </div>
           <div className="mini-panel last-session">
             <div className="panel-title">
