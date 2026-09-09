@@ -43,7 +43,8 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     // Sparse plans have too little existing context to constrain a legitimate priority add.
     const shouldCheckCoherence = planExercises.length >= 2 && otherPlanMuscles.size > 0
     const coherentCandidates = shouldCheckCoherence
-      ? priorityCandidates.filter((candidate) => candidate.primaryMuscles.some((muscleName) => muscleName.toLowerCase() !== normalizedPriority && otherPlanMuscles.has(muscleName.toLowerCase())))
+      // Secondary muscles can establish session fit, but never count as direct volume.
+      ? priorityCandidates.filter((candidate) => [...candidate.primaryMuscles.filter((muscleName) => muscleName.toLowerCase() !== normalizedPriority), ...candidate.secondaryMuscles].some((muscleName) => otherPlanMuscles.has(muscleName.toLowerCase())))
       : priorityCandidates
     const candidate = coherentCandidates[0]
     const coherenceMattered = shouldCheckCoherence && coherentCandidates.length < priorityCandidates.length

@@ -30,7 +30,13 @@ export function findContextualSubstitute(exercise: Exercise, exercises: Exercise
     .filter((candidate) => candidate.category === exercise.category)
     .filter((candidate) => candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)))
     .filter((candidate) => classifyPreference(candidate.id, preferences) !== 'disliked')
-    .sort((a, b) => Number(classifyPreference(b.id, preferences) === 'preferred') - Number(classifyPreference(a.id, preferences) === 'preferred'))[0]
+    .sort((a, b) => substituteScore(b, exercise, preferences) - substituteScore(a, exercise, preferences))[0]
+}
+
+function substituteScore(candidate: Exercise, original: Exercise, preferences: UserPreferences): number {
+  return (candidate.movementPattern === original.movementPattern ? 4 : 0)
+    + (candidate.type === original.type ? 1 : 0)
+    + (classifyPreference(candidate.id, preferences) === 'preferred' ? 1 : 0)
 }
 
 export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): PlanRecommendation[] {

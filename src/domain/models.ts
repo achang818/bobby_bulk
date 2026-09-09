@@ -1,4 +1,6 @@
 export type ExerciseType = 'compound' | 'isolation'
+export type MovementPattern = 'horizontal-pull' | 'vertical-pull' | 'horizontal-push' | 'vertical-push' | 'knee-dominant' | 'hip-hinge' | 'carry' | 'isolation' | 'other'
+export type JointAction = 'elbow-flexion' | 'elbow-extension' | 'shoulder-flexion' | 'shoulder-extension' | 'shoulder-abduction' | 'shoulder-adduction' | 'shoulder-horizontal-adduction' | 'shoulder-horizontal-abduction' | 'hip-flexion' | 'hip-extension' | 'hip-abduction' | 'hip-adduction' | 'knee-flexion' | 'knee-extension' | 'ankle-plantarflexion' | 'ankle-dorsiflexion' | 'trunk-flexion' | 'trunk-extension' | 'trunk-rotation' | 'trunk-stability' | 'scapular-retraction' | 'scapular-elevation'
 
 export interface Exercise {
   id: string
@@ -6,8 +8,11 @@ export interface Exercise {
   category: string
   equipment: string
   primaryMuscles: string[]
+  secondaryMuscles: string[]
   goals: string[]
   type: ExerciseType
+  movementPattern: MovementPattern
+  primaryAction: JointAction
   repRange: { min: number; max: number }
   defaultSets: number
 }

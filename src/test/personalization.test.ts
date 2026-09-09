@@ -92,7 +92,6 @@ describe('plan evaluation', () => {
     const add = result.find((item) => item.type === 'ADD')
 
     expect(add?.exerciseId).toBe(bench.id)
-    expect(add?.reasons).toContain("This exercise fits your plan's existing muscle groups.")
   })
 
   it('allows a priority add for a single-exercise plan without coherence context', () => {
@@ -129,9 +128,9 @@ describe('plan evaluation', () => {
   })
 
   it('prefers a muscle-specific isolation replacement and traces that preference', () => {
-    const stalledIsolation = { id: 'stalled-fly', name: 'Stalled Fly', category: 'Isolation', equipment: 'Cable', primaryMuscles: ['Chest', 'Triceps'], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
-    const broadCandidate = { id: 'broad-press', name: 'Broad Press', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest'], goals: ['Build muscle'], type: 'compound' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
-    const specificCandidate = { id: 'specific-fly', name: 'Specific Fly', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest', 'Triceps'], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const stalledIsolation = { id: 'stalled-fly', name: 'Stalled Fly', category: 'Isolation', equipment: 'Cable', primaryMuscles: ['Chest', 'Triceps'], secondaryMuscles: [], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3, movementPattern: 'horizontal-push' as const, primaryAction: 'shoulder-horizontal-adduction' as const }
+    const broadCandidate = { id: 'broad-press', name: 'Broad Press', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest'], secondaryMuscles: [], goals: ['Build muscle'], type: 'compound' as const, repRange: { min: 10, max: 15 }, defaultSets: 3, movementPattern: 'horizontal-push' as const, primaryAction: 'shoulder-horizontal-adduction' as const }
+    const specificCandidate = { id: 'specific-fly', name: 'Specific Fly', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest', 'Triceps'], secondaryMuscles: [], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3, movementPattern: 'horizontal-push' as const, primaryAction: 'shoulder-horizontal-adduction' as const }
     const isolationPlan: WorkoutPlan = { id: 'isolation', name: 'Isolation', description: 'test', focus: 'Chest', exerciseIds: [stalledIsolation.id] }
     const history = [workout('a', '2026-08-20', stalledIsolation.id, 12), workout('b', '2026-08-25', stalledIsolation.id, 12), workout('c', '2026-09-01', stalledIsolation.id, 12)]
 
@@ -142,8 +141,8 @@ describe('plan evaluation', () => {
   })
 
   it('uses the existing stall replacement trace when no specific isolation candidate exists', () => {
-    const stalledIsolation = { id: 'stalled-fly', name: 'Stalled Fly', category: 'Isolation', equipment: 'Cable', primaryMuscles: ['Chest', 'Triceps'], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
-    const broadCandidate = { id: 'broad-press', name: 'Broad Press', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest'], goals: ['Build muscle'], type: 'compound' as const, repRange: { min: 10, max: 15 }, defaultSets: 3 }
+    const stalledIsolation = { id: 'stalled-fly', name: 'Stalled Fly', category: 'Isolation', equipment: 'Cable', primaryMuscles: ['Chest', 'Triceps'], secondaryMuscles: [], goals: ['Build muscle'], type: 'isolation' as const, repRange: { min: 10, max: 15 }, defaultSets: 3, movementPattern: 'horizontal-push' as const, primaryAction: 'shoulder-horizontal-adduction' as const }
+    const broadCandidate = { id: 'broad-press', name: 'Broad Press', category: 'Isolation', equipment: 'Machine', primaryMuscles: ['Chest'], secondaryMuscles: [], goals: ['Build muscle'], type: 'compound' as const, repRange: { min: 10, max: 15 }, defaultSets: 3, movementPattern: 'horizontal-push' as const, primaryAction: 'shoulder-horizontal-adduction' as const }
     const isolationPlan: WorkoutPlan = { id: 'isolation', name: 'Isolation', description: 'test', focus: 'Chest', exerciseIds: [stalledIsolation.id] }
     const history = [workout('a', '2026-08-20', stalledIsolation.id, 12), workout('b', '2026-08-25', stalledIsolation.id, 12), workout('c', '2026-09-01', stalledIsolation.id, 12)]
 

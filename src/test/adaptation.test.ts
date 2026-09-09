@@ -12,6 +12,19 @@ const plan: WorkoutPlan = {
 const context = (gymId = 'default-gym', unavailableEquipment: TodaysContext['unavailableEquipment'] = ['cables']): TodaysContext => ({ gymId, unavailableEquipment })
 
 describe('context adaptation', () => {
+  it('keeps primary joint action separate from the broad movement pattern', () => {
+    const fly = exercises.find((exercise) => exercise.id === 'low-to-high-cable-fly')!
+    const press = exercises.find((exercise) => exercise.id === 'incline-db-bench')!
+
+    expect(fly.movementPattern).toBe('horizontal-push')
+    expect(fly.primaryAction).toBe('shoulder-horizontal-adduction')
+    expect(fly.primaryMuscles).toEqual(['Upper chest'])
+    expect(fly.secondaryMuscles).toEqual(['Front delts'])
+    expect(press.primaryAction).toBe('shoulder-horizontal-adduction')
+    expect(fly.type).toBe('isolation')
+    expect(press.type).toBe('compound')
+  })
+
   it('does not substitute equipment that is available', () => {
     expect(adaptWorkout(plan, exercises, context('default-gym', []), defaultPreferences)).toEqual([])
   })
@@ -56,6 +69,20 @@ describe('context adaptation', () => {
     const replacements = adaptWorkout(pullPlan, exercises, context('default-gym', ['cables']), defaultPreferences)
 
     expect(replacements.some((recommendation) => recommendation.alternativeExerciseId === 'pull-up')).toBe(false)
+  })
+
+  it('preserves horizontal and vertical pull intent when equipment is limited', () => {
+    const pullPlan: WorkoutPlan = {
+      id: 'limited-pull', name: 'Pull', description: 'test', focus: 'Back',
+      exerciseIds: ['cable-row', 'lat-pulldown'],
+    }
+    const replacements = adaptWorkout(pullPlan, exercises, context('default-gym', ['cables']), defaultPreferences)
+
+    for (const replacement of replacements) {
+      const original = exercises.find((exercise) => exercise.id === replacement.exerciseId)!
+      const alternative = exercises.find((exercise) => exercise.id === replacement.alternativeExerciseId)!
+      expect(alternative.movementPattern).toBe(original.movementPattern)
+    }
   })
 })
 
