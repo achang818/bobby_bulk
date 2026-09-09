@@ -42,6 +42,7 @@ main { max-width: 1160px; margin: 0 auto; padding: 68px 28px 100px; }.page-intro
 .history-plan-comparison { background: #eef5f5; color: #5b777b; }
 .exercise-progress-summary { border-top: 1px solid var(--line); padding-top: 16px; display: grid; gap: 5px; color: var(--muted); font-size: 11px; }
 .exercise-progress-summary strong { color: var(--ink); font-size: 14px; text-transform: capitalize; }
+.workout-health-panel { display: grid; gap: 10px; }.workout-health-coverage, .workout-health-ok { margin: 0; color: var(--muted); font-size: 11px; line-height: 1.5; }.workout-health-finding { display: grid; gap: 3px; border-top: 1px solid var(--line); padding-top: 10px; font-size: 11px; }.workout-health-finding strong { color: #8b4d3c; }.workout-health-finding span { color: var(--muted); line-height: 1.45; }.workout-health-ok { color: #496c2c; }
 .logger-exercise-picker { display: grid; gap: 8px; margin: 0 0 14px; padding: 10px 12px; border: 1px solid #dce5d4; background: #f8fbf5; }
 .logger-picker-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }.logger-picker-heading strong { font-size: 11px; }.logger-picker-heading small { color: var(--muted); font-size: 9px; text-align: right; }
 .logger-exercise-picker label { margin: 0 !important; color: #6c756a; font-size: 9px; }.logger-exercise-picker input, .logger-exercise-picker select { width: 100%; box-sizing: border-box; margin-top: 4px !important; padding: 8px 10px !important; background: var(--paper) !important; }

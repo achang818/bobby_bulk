@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { exercises } from "./domain/exercises";
 import { sampleWorkouts } from "./domain/seed";
@@ -7,6 +7,7 @@ import { evaluatePlan } from "./domain/plan-evaluator";
 import { adaptWorkout, adaptWorkoutForTime } from "./domain/adaptation";
 import { classifyFatigue } from "./domain/states";
 import { calculateExerciseFeatures, comparePlannedVsActual } from "./domain/features";
+import { evaluateWorkout } from "./domain/workout-evaluator";
  import { loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
 import { completeWorkoutSession, createPlannedExercise, createWorkoutSession, planExerciseIds, resolveWorkoutForToday } from "./domain/workout-session";
@@ -212,7 +213,18 @@ function EvaluatedTodayView({ plan, exerciseIds, setTargets, recommendations, de
     onDecision: (recommendation: PlanRecommendation, decision: "accepted" | "rejected" | "dismissed") => void;
 }) {
     const lastWorkout = [...workouts].sort((a, b) => b.date.localeCompare(a.date))[0];
+    const workoutHealth = evaluateWorkout(plan, exercises, todaysContext);
     const changes = recommendations.filter((recommendation) => recommendation.type !== "KEEP").slice(0, 4);
+    useEffect(() => {
+        const column = document.querySelector(".side-column");
+        if (!column) return;
+        const panel = document.createElement("section");
+        panel.className = "mini-panel workout-health-panel";
+        const warnings = workoutHealth.findings.filter((finding) => finding.severity !== "info");
+        panel.innerHTML = `<div class="panel-title"><span>Workout health</span><span>${workoutHealth.plannedSets} sets</span></div><p class="workout-health-coverage">${Object.entries(workoutHealth.primaryMuscleSets).map(([muscle, sets]) => `${muscle} ${sets}`).join(" · ") || "No direct working sets"}</p>${warnings.length ? warnings.map((finding) => `<div class="workout-health-finding ${finding.severity}"><strong>${finding.title}</strong><span>${finding.description}</span></div>`).join("") : "<p class=\"workout-health-ok\">No structural concerns identified.</p>"}`;
+        column.insertBefore(panel, column.children[1] ?? null);
+        return () => panel.remove();
+    }, [workoutHealth]);
     const hasWorkout = exerciseIds.length > 0;
     return (<>      <section className="page-intro">        <div>          <p className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>          <h1>Today's Recommendation</h1>          <p className="lede">            A focused session based on your plan, recent training, and performance.          </p>        </div>        <button className="primary-button" onClick={hasWorkout ? onLog : onChooseSomethingElse}>          {hasWorkout ? "Start workout" : "Create a plan"}        </button>      </section>      <section className="dashboard-grid">        <div className="recommendation-panel">          <div className="panel-topline">            <span className="status-dot"></span>            <span>Recommended session</span>            <span className="confidence">              {recommendations.length} observations            </span>            <span className="fatigue-indicator">Fatigue {fatigue}</span>          </div>          <div className="recommendation-main">            <div>              <p className="eyebrow warm">YOUR NEXT WORKOUT · LOADS IN {unit}</p>              <h2>{plan.name}</h2>              <p className="recommendation-sub">                Based on your plan, recent training, and performance.              </p>            </div>            <div className="weight-callout">              <strong>{exerciseIds.length}</strong>              <span>movements</span>            </div>          </div>          <div className="today-plan-list">            <div className="today-plan-label">Recommended working sets</div>            {!hasWorkout && <p className="empty-state">Create your first plan to give Bobby a routine to adapt and evaluate.</p>}            {exerciseIds.map((id, index) => {
             const exercise = exercises.find((item) => item.id === id);

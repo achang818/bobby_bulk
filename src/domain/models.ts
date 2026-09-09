@@ -164,6 +164,11 @@ export interface TrainingState {
   muscles: MuscleFeatures[]
 }
 
+export type WorkoutFindingCategory = 'muscle-coverage' | 'volume' | 'redundancy' | 'movement-pattern' | 'ordering' | 'duration' | 'goal-alignment'
+export type WorkoutFindingSeverity = 'info' | 'warning' | 'critical'
+export interface WorkoutFinding { category: WorkoutFindingCategory; severity: WorkoutFindingSeverity; title: string; description: string; evidence: string[] }
+export interface WorkoutEvaluation { plannedSets: number; estimatedMinutes: number; primaryMuscleSets: Record<string, number>; secondaryMuscles: string[]; movementPatterns: MovementPattern[]; findings: WorkoutFinding[] }
+
 export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY'
 
 export type EvidenceLevel = 'A' | 'B' | 'C' | 'D' | 'Personal'
