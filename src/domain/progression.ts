@@ -46,7 +46,7 @@ export function recommendNext(
     repRange: exercise.repRange,
     action: 'progress-reps',
     reasons: [
-      `You have not reached ${exercise.defaultSets} × ${exercise.repRange.max} yet.`,
+      `Aim for ${exercise.defaultSets} × ${exercise.repRange.max} before increasing weight.`,
       'Keep the load steady and try to add a rep where you can.',
     ],
   }

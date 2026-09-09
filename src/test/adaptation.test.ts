@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { adaptWorkout, findContextualSubstitute } from '../domain/adaptation'
+import { adaptWorkout, adaptWorkoutForTime, findContextualSubstitute } from '../domain/adaptation'
 import { exercises } from '../domain/exercises'
 import { defaultPreferences } from '../domain/preferences'
 import type { TodaysContext, WorkoutPlan } from '../domain/models'
@@ -36,5 +36,33 @@ describe('context adaptation', () => {
     expect(substitute?.id).not.toBe('barbell-row')
     expect(substitute?.id).not.toBe('chest-supported-row')
     expect(substitute?.id).not.toBe('single-arm-db-row')
+  })
+})
+
+describe('time adaptation', () => {
+  const timePlan: WorkoutPlan = {
+    id: 'time-test', name: 'Time test', description: 'test', focus: 'Full body',
+    exerciseIds: ['barbell-bench-press', 'cable-lateral-raise', 'triceps-pushdown'],
+  }
+
+  it('makes no changes when time is sufficient', () => {
+    expect(adaptWorkoutForTime(timePlan, exercises, 60)).toEqual([])
+  })
+
+  it('returns no changes when available time is undefined', () => {
+    expect(adaptWorkoutForTime(timePlan, exercises, undefined)).toEqual([])
+  })
+
+  it('reduces sets before removing an exercise', () => {
+    const recommendations = adaptWorkoutForTime(timePlan, exercises, 20)
+    expect(recommendations[0]?.type).toBe('MODIFY')
+    expect(recommendations.some((recommendation) => recommendation.type === 'REMOVE')).toBe(false)
+  })
+
+  it('preserves compounds over isolation when removal is forced', () => {
+    const recommendations = adaptWorkoutForTime(timePlan, exercises, 14)
+    const removedIds = recommendations.filter((recommendation) => recommendation.type === 'REMOVE').map((recommendation) => recommendation.exerciseId)
+    expect(removedIds).toContain('cable-lateral-raise')
+    expect(removedIds).not.toContain('barbell-bench-press')
   })
 })

@@ -340,6 +340,18 @@ export const trainingPrinciples: TrainingPrinciple[] = [
   },
 
   {
+    id: 'time-constraint',
+    topic: 'Adapting training to available time',
+    description:
+      'When time is limited, preserve the most important movements while reducing lower-priority work before removing an exercise. Supersetting is deferred until session-flow support exists.',
+    evidenceLevel: 'D',
+    source: {
+      name: 'Practical coaching heuristic',
+      year: 2026,
+    },
+  },
+
+  {
     id: 'exercise-substitution',
     topic: 'Exercise substitution',
     description:

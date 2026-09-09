@@ -1,10 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 import { exercises } from "./domain/exercises";
 import { sampleWorkouts } from "./domain/seed";
 import { workoutTemplates } from "./domain/templates";
 import { evaluatePlan } from "./domain/plan-evaluator";
-import { adaptWorkout } from "./domain/adaptation";
+import { adaptWorkout, adaptWorkoutForTime } from "./domain/adaptation";
 import { classifyFatigue } from "./domain/states";
 import {
   loadPlans,
@@ -12,6 +12,7 @@ import {
   loadSavedTemplates,
   loadWorkouts,
   loadGyms,
+  loadRecommendationDecisions,
   loadTodaysContext,
   deletePlan,
   deleteWorkout,
@@ -45,6 +46,13 @@ const defaultGym: Gym = {
   availableLoads: [{ equipment: "dumbbells", increments: [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70] }],
 };
 const equipmentOptions: EquipmentTag[] = ["dumbbells", "barbells", "cables", "machines", "benches", "pull-up-bar"];
+const emptyPlan: WorkoutTemplate = {
+  id: "no-plan-selected",
+  name: "No workout selected",
+  description: "Create a plan first, then Bobby can recommend how to perform it today.",
+  focus: "Your training plan",
+  exerciseIds: [],
+};
 
 function App() {
   const [view, setView] = useState<View>("today");
@@ -58,9 +66,8 @@ function App() {
   const [reps, setReps] = useState("8");
   const [rir, setRir] = useState("");
   const [showLogger, setShowLogger] = useState(false);
-  const [activePlan, setActivePlan] = useState<WorkoutTemplate>(
-    workoutTemplates[0],
-  );
+  const [recommendationDecisions, setRecommendationDecisions] = useState<Record<string, string>>(() => loadRecommendationDecisions());
+  const [activePlan, setActivePlan] = useState<WorkoutTemplate>(() => loadPlans()[0] ?? emptyPlan);
   const [plans, setPlans] = useState<WorkoutTemplate[]>(() => loadPlans());
   const [preferences, setPreferences] = useState<UserPreferences>(() =>
     loadPreferences(),
@@ -73,14 +80,54 @@ function App() {
     loadTodaysContext({ gymId: preferences.defaultGymId ?? defaultGym.id, unavailableEquipment: [] }),
   );
   const currentGym = gyms.find((gym) => gym.id === todaysContext.gymId) ?? gyms[0] ?? defaultGym;
+  const workoutsInCurrentUnit = useMemo(() => workouts.map((workout) => ({
+    ...workout,
+    unit: preferences.weightUnit,
+    sets: workout.sets.map((set) => ({
+      ...set,
+      weight: displayWeight(set.weight, workout.unit, preferences.weightUnit),
+    })),
+  })), [preferences.weightUnit, workouts]);
+  const goalCriticalExerciseIds = activePlan.exerciseIds.filter((id) => {
+    const exercise = exercises.find((item) => item.id === id);
+    return exercise?.primaryMuscles.some((muscle) => preferences.priorities.some((priority) => priority.toLowerCase() === muscle.toLowerCase())) ?? false;
+  });
   const planRecommendations = useMemo(
-    () => [...evaluatePlan(activePlan, exercises, workouts, preferences, undefined, currentGym.availableLoads), ...adaptWorkout(activePlan, exercises, todaysContext, preferences)].sort((a, b) => b.score - a.score),
-    [activePlan, currentGym.availableLoads, preferences, todaysContext, workouts],
+    () => [...evaluatePlan(activePlan, exercises, workoutsInCurrentUnit, preferences, undefined, currentGym.availableLoads), ...adaptWorkout(activePlan, exercises, todaysContext, preferences), ...adaptWorkoutForTime(activePlan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds)].sort((a, b) => b.score - a.score),
+    [activePlan, currentGym.availableLoads, goalCriticalExerciseIds, preferences, todaysContext, workoutsInCurrentUnit],
   );
   const adaptedPlanExerciseIds = useMemo(() => activePlan.exerciseIds.map((id) => {
-    const recommendation = planRecommendations.find((item) => item.type === "REPLACE" && item.exerciseId === id && item.alternativeExerciseId);
+    const recommendation = planRecommendations.find((item) =>
+      item.type === "REPLACE" &&
+      item.exerciseId === id &&
+      item.alternativeExerciseId &&
+      (item.trace.ruleId === "adapt-unavailable-equipment" || recommendationDecisions[item.id] === "accepted"),
+    );
     return recommendation?.alternativeExerciseId ?? id;
-  }), [activePlan.exerciseIds, planRecommendations]);
+  }), [activePlan.exerciseIds, planRecommendations, recommendationDecisions]);
+  const workoutExerciseIds = useMemo(() => adaptedPlanExerciseIds.filter((id) => !planRecommendations.some((item) => item.type === "REMOVE" && item.exerciseId === id && item.trace.ruleId === "adapt-available-time" && recommendationDecisions[item.id] !== "dismissed")), [adaptedPlanExerciseIds, planRecommendations, recommendationDecisions]);
+  const setTargets = useMemo(() => new Map(workoutExerciseIds.map((id) => {
+    const exercise = exercises.find((item) => item.id === id);
+    const recommendation = planRecommendations.find((item) => item.type === "MODIFY" && item.exerciseId === id && item.trace.ruleId === "adapt-available-time" && recommendationDecisions[item.id] !== "dismissed");
+    return [id, recommendation?.modifiedSets ?? exercise?.defaultSets ?? 0];
+  })), [planRecommendations, recommendationDecisions, workoutExerciseIds]);
+
+  useEffect(() => {
+    if (!showLogger) return;
+    const exercise = exercises.find((item) => item.id === selectedExerciseId);
+    if (!exercise) return;
+    const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && item.exerciseId === selectedExerciseId && recommendationDecisions[item.id] !== "dismissed")?.progression;
+    const latestSet = [...workouts]
+      .sort((a, b) => b.date.localeCompare(a.date))
+      .flatMap((workout) => workout.sets.filter((set) => set.exerciseId === selectedExerciseId).map((set) => ({
+        ...set,
+        weight: displayWeight(set.weight, workout.unit, preferences.weightUnit),
+      })))
+      .at(0);
+    setWeight(String(progression?.weight || latestSet?.weight || 0));
+    setReps(String(progression?.repRange.min ?? latestSet?.reps ?? exercise.repRange.min));
+    setRir("");
+  }, [planRecommendations, preferences.weightUnit, recommendationDecisions, selectedExerciseId, showLogger, workoutExerciseIds, workouts]);
 
   function updateTodaysContext(next: TodaysContext) {
     setTodaysContext(saveTodaysContext(next));
@@ -97,6 +144,8 @@ function App() {
       (parsedRir !== undefined && (!Number.isFinite(parsedRir) || parsedRir < 0 || parsedRir > 5))
     )
       return;
+    const target = setTargets.get(selectedExerciseId) ?? 0;
+    const completedSets = draftSets.filter((set) => set.exerciseId === selectedExerciseId).length;
     setDraftSets((current) => [
       ...current,
       {
@@ -107,6 +156,13 @@ function App() {
         ...(parsedRir === undefined ? {} : { rir: parsedRir }),
       },
     ]);
+    if (completedSets + 1 === target) {
+      const currentIndex = workoutExerciseIds.indexOf(selectedExerciseId);
+      const nextExerciseId = workoutExerciseIds.slice(currentIndex + 1).find((id) =>
+        draftSets.filter((set) => set.exerciseId === id).length < (setTargets.get(id) ?? 0),
+      );
+      if (nextExerciseId) setSelectedExerciseId(nextExerciseId);
+    }
   }
 
   function finishWorkout() {
@@ -125,14 +181,26 @@ function App() {
   }
 
   function startPlan(plan: WorkoutTemplate) {
+    const planGoalCriticalIds = plan.exerciseIds.filter((id) => {
+      const exercise = exercises.find((item) => item.id === id);
+      return exercise?.primaryMuscles.some((muscle) => preferences.priorities.some((priority) => priority.toLowerCase() === muscle.toLowerCase())) ?? false;
+    });
+    const contextRecommendations = adaptWorkout(plan, exercises, todaysContext, preferences);
+    const shortenedExerciseIds = plan.exerciseIds
+      .map((id) => contextRecommendations.find((item) => item.type === "REPLACE" && item.exerciseId === id)?.alternativeExerciseId ?? id)
+      .filter((id) => !adaptWorkoutForTime(plan, exercises, todaysContext.availableMinutes, planGoalCriticalIds).some((item) => item.type === "REMOVE" && item.exerciseId === id));
     setActivePlan(plan);
-    setSelectedExerciseId(plan.exerciseIds[0] ?? exercises[0].id);
+    setSelectedExerciseId(shortenedExerciseIds[0] ?? exercises[0].id);
     setDraftSets([]);
     setShowLogger(true);
   }
 
   function startRecommendedWorkout() {
-    setSelectedExerciseId(adaptedPlanExerciseIds[0] ?? exercises[0].id);
+    if (workoutExerciseIds.length === 0) {
+      setView("plans");
+      return;
+    }
+    setSelectedExerciseId(workoutExerciseIds[0] ?? exercises[0].id);
     setDraftSets([]);
     setShowLogger(true);
   }
@@ -199,17 +267,19 @@ function App() {
         {view === "today" && (
           <EvaluatedTodayView
             plan={activePlan}
+            exerciseIds={workoutExerciseIds}
+            setTargets={setTargets}
             recommendations={planRecommendations}
-            workouts={workouts}
+            decisions={recommendationDecisions}
+            workouts={workoutsInCurrentUnit}
             unit={preferences.weightUnit}
             gyms={gyms}
             todaysContext={todaysContext}
             fatigue={classifyFatigue(workouts)}
             onContextChange={updateTodaysContext}
             onLog={startRecommendedWorkout}
-            onDecision={(id, decision) =>
-              saveRecommendationDecision(id, decision)
-            }
+            onChooseSomethingElse={() => setView("plans")}
+            onDecision={(id, decision) => setRecommendationDecisions(saveRecommendationDecision(id, decision))}
           />
         )}
         {view === "history" && (
@@ -261,7 +331,7 @@ function App() {
               </button>
             </div>
             <div className="plan-preview">
-              {adaptedPlanExerciseIds.map((id, index) => (
+              {workoutExerciseIds.map((id, index) => (
                 <span
                   key={id}
                   className={
@@ -276,7 +346,7 @@ function App() {
               ))}
             </div>
             <div className="logger-exercises">
-              {adaptedPlanExerciseIds.map((id, index) => {
+              {workoutExerciseIds.map((id, index) => {
                 const exercise = exercises.find((item) => item.id === id);
                 const loggedSets = draftSets.filter((set) => set.exerciseId === id);
                 if (!exercise) return null;
@@ -286,9 +356,9 @@ function App() {
                       <span className="logger-exercise-number">{String(index + 1).padStart(2, "0")}</span>
                       <span>
                         <strong>{exercise.name}</strong>
-                        <small>{loggedSets.length}/{exercise.defaultSets} working sets · {exercise.repRange.min}–{exercise.repRange.max} reps</small>
+                        <small>{loggedSets.length}/{setTargets.get(id) ?? exercise.defaultSets} recommended working sets · {exercise.repRange.min}–{exercise.repRange.max} reps</small>
                       </span>
-                      <span className="logger-exercise-state">{loggedSets.length === exercise.defaultSets ? "✓" : ""}</span>
+                      <span className="logger-exercise-state">{loggedSets.length === (setTargets.get(id) ?? exercise.defaultSets) ? "✓" : ""}</span>
                     </button>
                     {selectedExerciseId === id && <div className="logger-set-entry">
                       {loggedSets.map((set, setIndex) => <div className="logged-set" key={set.id}><span>Set {setIndex + 1}</span><strong>{set.weight} {preferences.weightUnit} × {set.reps}</strong><span>RIR {set.rir ?? "-"}</span></div>)}
@@ -306,7 +376,12 @@ function App() {
                           <input inputMode="numeric" min="0" max="5" placeholder="Optional" value={rir} onChange={(event) => setRir(event.target.value)} />
                         </label>
                       </div>
-                      <button className="secondary-button full" onClick={addSet}>✓ Log set</button>
+                      <button className="secondary-button full" onClick={addSet}>
+                        {loggedSets.length >= (setTargets.get(id) ?? exercise.defaultSets) ? "＋ Log extra working set" : "✓ Log working set"}
+                      </button>
+                      {loggedSets.length >= (setTargets.get(id) ?? exercise.defaultSets) && (
+                        <p className="extra-set-note">The recommendation is complete. Extra sets are recorded and included in your history.</p>
+                      )}
                     </div>}
                   </article>
                 );
@@ -319,7 +394,7 @@ function App() {
                   value={selectedExerciseId}
                   onChange={(event) => setSelectedExerciseId(event.target.value)}
                 >
-                {adaptedPlanExerciseIds.map((id) => {
+                {workoutExerciseIds.map((id) => {
                   const exercise = exercises.find((item) => item.id === id);
                   return exercise ? (
                     <option key={exercise.id} value={exercise.id}>
@@ -336,7 +411,7 @@ function App() {
                   Log sets as you move through the plan.
                 </p>
               ) : (
-                draftSets.map((set, index) => (
+                draftSets.map((set) => (
                   <div className="draft-set" key={set.id}>
                     <span>
                       {
@@ -344,10 +419,10 @@ function App() {
                           (exercise) => exercise.id === set.exerciseId,
                         )?.name
                       }{" "}
-                      · Set {index + 1}
+                      · Set {draftSets.filter((item) => item.exerciseId === set.exerciseId).findIndex((item) => item.id === set.id) + 1}
                     </span>
                     <strong>
-                      {set.weight} lb × {set.reps}
+                      {set.weight} {preferences.weightUnit} × {set.reps}
                     </strong>
                     <button
                       onClick={() =>
@@ -441,7 +516,7 @@ export function LegacyTodayView({
               ) : null;
             })}
           </div>
-          <div className="why-box">
+          <div className="why-box" id="recommendation-changes">
             <div className="why-title">
               <span className="why-icon">?</span>
               <strong>Why this recommendation?</strong>
@@ -526,7 +601,10 @@ export function LegacyTodayView({
 
 function EvaluatedTodayView({
   plan,
+  exerciseIds,
+  setTargets,
   recommendations,
+  decisions,
   workouts,
   unit,
   gyms,
@@ -534,10 +612,14 @@ function EvaluatedTodayView({
   fatigue,
   onContextChange,
   onLog,
+  onChooseSomethingElse,
   onDecision,
 }: {
   plan: WorkoutTemplate;
+  exerciseIds: string[];
+  setTargets: Map<string, number>;
   recommendations: PlanRecommendation[];
+  decisions: Record<string, string>;
   workouts: Workout[];
   unit: WeightUnit;
   gyms: Gym[];
@@ -545,6 +627,7 @@ function EvaluatedTodayView({
   fatigue: "Low" | "Moderate" | "High";
   onContextChange: (context: TodaysContext) => void;
   onLog: () => void;
+  onChooseSomethingElse: () => void;
   onDecision: (
     id: string,
     decision: "accepted" | "rejected" | "dismissed",
@@ -553,26 +636,27 @@ function EvaluatedTodayView({
   const lastWorkout = [...workouts].sort((a, b) =>
     b.date.localeCompare(a.date),
   )[0];
+  const changes = recommendations.filter((recommendation) => recommendation.type !== "KEEP").slice(0, 4);
+  const hasWorkout = exerciseIds.length > 0;
   return (
     <>
       <section className="page-intro">
         <div>
           <p className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>
-          <h1>Make today count.</h1>
+          <h1>Today's Recommendation</h1>
           <p className="lede">
-            Your plan stays yours. Bobby highlights evidence-backed changes to
-            consider.
+            A focused session based on your plan, recent training, and performance.
           </p>
         </div>
-        <button className="primary-button" onClick={onLog}>
-          ＋ Start workout
+        <button className="primary-button" onClick={hasWorkout ? onLog : onChooseSomethingElse}>
+          {hasWorkout ? "Start workout" : "Create a plan"}
         </button>
       </section>
       <section className="dashboard-grid">
         <div className="recommendation-panel">
           <div className="panel-topline">
             <span className="status-dot"></span>
-            <span>Plan under review</span>
+            <span>Recommended session</span>
             <span className="confidence">
               {recommendations.length} observations
             </span>
@@ -580,37 +664,41 @@ function EvaluatedTodayView({
           </div>
           <div className="recommendation-main">
             <div>
-              <p className="eyebrow warm">TODAY'S SESSION</p>
+              <p className="eyebrow warm">YOUR NEXT WORKOUT · LOADS IN {unit}</p>
               <h2>{plan.name}</h2>
               <p className="recommendation-sub">
-                {plan.focus} · {plan.exerciseIds.length} exercises
+                Based on your plan, recent training, and performance.
               </p>
             </div>
             <div className="weight-callout">
-              <strong>{plan.exerciseIds.length}</strong>
+              <strong>{exerciseIds.length}</strong>
               <span>movements</span>
             </div>
           </div>
-          <div className="plan-exercise-list">
-            {plan.exerciseIds.map((id, index) => {
+          <div className="today-plan-list">
+            <div className="today-plan-label">Recommended working sets</div>
+            {!hasWorkout && <p className="empty-state">Create your first plan to give Bobby a routine to adapt and evaluate.</p>}
+            {exerciseIds.map((id, index) => {
               const exercise = exercises.find((item) => item.id === id);
+              const progression = recommendations.find((item) => item.type === "PROGRESSION" && item.exerciseId === id)?.progression;
               return exercise ? (
-                <div className="plan-row" key={id}>
+                <div className="today-plan-row" key={id}>
                   <span>{String(index + 1).padStart(2, "0")}</span>
-                  <strong>{exercise.name}</strong>
-                  <small>
-                    {exercise.defaultSets} × {exercise.repRange.min}–
-                    {exercise.repRange.max}
-                  </small>
+                  <div>
+                    <strong>{exercise.name}</strong>
+                    <small>{setTargets.get(id) ?? exercise.defaultSets} sets · {exercise.repRange.min}–{exercise.repRange.max} reps</small>
+                  </div>
+                  <small className="today-load">{progression?.weight ? `${progression.weight} ${unit}` : "Use last session"}</small>
                 </div>
               ) : null;
             })}
           </div>
-          <div className="context-controls">
-            <div className="context-heading">
-              <strong>Today's context</strong>
-              <span>Temporary changes only</span>
-            </div>
+          <details className="context-controls">
+            <summary>
+              <span>Today's context</span>
+              <small>{gyms.find((gym) => gym.id === todaysContext.gymId)?.name ?? "Gym not set"}{todaysContext.availableMinutes ? ` · ${todaysContext.availableMinutes} min` : ""}</small>
+            </summary>
+            <p className="context-help">Temporary constraints adapt today’s workout only; your saved plan stays unchanged.</p>
             <label className="context-select">
               Gym
               <select
@@ -649,35 +737,35 @@ function EvaluatedTodayView({
                 </label>
               ))}
             </fieldset>
-          </div>
-          <div className="why-box">
+          </details>
+          <div className="why-box" id="recommendation-changes">
             <div className="why-title">
               <span className="why-icon">i</span>
-              <strong>Bobby's recommendations</strong>
+              <strong>Suggestions</strong>
             </div>
-            {recommendations.length === 0 ? (
+            {changes.length === 0 ? (
               <p>
                 <span>↳</span>No changes are strongly supported by the current
                 history. Keep following your plan.
               </p>
             ) : (
-              recommendations
-                .slice(0, 5)
+              changes
                 .map((item) => (
                   <RecommendationRow
                     key={item.id}
                     recommendation={item}
                     unit={unit}
+                    decision={decisions[item.id]}
                     onDecision={onDecision}
                   />
                 ))
             )}
           </div>
           <div className="recommendation-actions">
-            <button className="primary-button" onClick={onLog}>
-              Start {plan.name}
+            <button className="primary-button" onClick={hasWorkout ? onLog : onChooseSomethingElse}>
+              {hasWorkout ? "Start workout" : "Create a plan"}
             </button>
-            <button className="text-button">Change plan →</button>
+            <button className="text-button" onClick={onChooseSomethingElse}>Choose something else</button>
           </div>
         </div>
         <aside className="side-column">
@@ -687,15 +775,19 @@ function EvaluatedTodayView({
             </div>
             <div className="brief-row">
               <span>Exercises</span>
-              <strong>{plan.exerciseIds.length}</strong>
+              <strong>{exerciseIds.length}</strong>
             </div>
             <div className="brief-row">
               <span>Planned sets</span>
-              <strong>{plan.exerciseIds.reduce((total, id) => total + (exercises.find((exercise) => exercise.id === id)?.defaultSets ?? 0), 0)}</strong>
+              <strong>{exerciseIds.reduce((total, id) => total + (setTargets.get(id) ?? exercises.find((exercise) => exercise.id === id)?.defaultSets ?? 0), 0)}</strong>
             </div>
             <div className="brief-row">
               <span>Gym</span>
               <strong>{gyms.find((gym) => gym.id === todaysContext.gymId)?.name ?? "Not set"}</strong>
+            </div>
+            <div className="brief-row">
+              <span>Estimated fatigue</span>
+              <strong className={`fatigue-${fatigue.toLowerCase()}`}>{fatigue}</strong>
             </div>
             <p className="brief-note">Your routine is the baseline. Bobby only proposes changes where today's context or your history gives it a reason.</p>
           </div>
@@ -720,10 +812,12 @@ function EvaluatedTodayView({
 function RecommendationRow({
   recommendation,
   unit = "lb",
+  decision,
   onDecision,
 }: {
   recommendation: PlanRecommendation;
   unit?: WeightUnit;
+  decision?: string;
   onDecision: (
     id: string,
     decision: "accepted" | "rejected" | "dismissed",
@@ -735,6 +829,7 @@ function RecommendationRow({
   const alternative = recommendation.alternativeExerciseId
     ? exercises.find((item) => item.id === recommendation.alternativeExerciseId)
     : undefined;
+  const requiredToday = recommendation.trace.ruleId === "adapt-unavailable-equipment";
   return (
     <div className="recommendation-row">
       <div>
@@ -751,21 +846,38 @@ function RecommendationRow({
               : "Start with a manageable load"}
           </small>
         )}
-        {recommendation.reasons.map((reason) => (
-          <small key={reason}>{reason}</small>
-        ))}
-        <small className="evidence-badge">
-          Evidence {recommendation.trace.evidenceLevel} ·{" "}
-          {recommendation.trace.source.name}
-        </small>
+        <small>{recommendation.reasons[0]}</small>
+        <details className="recommendation-details">
+          <summary>Why</summary>
+          {recommendation.reasons.slice(1).map((reason) => (
+            <small key={reason}>{reason}</small>
+          ))}
+          <small>{recommendation.trace.principleDescription}</small>
+          <small className="evidence-badge">
+            Evidence {recommendation.trace.evidenceLevel} ·{" "}
+            {recommendation.trace.source.name}
+          </small>
+        </details>
       </div>
       <div className="recommendation-controls">
-        <button onClick={() => onDecision(recommendation.id, "accepted")}>
-          Accept
-        </button>
-        <button onClick={() => onDecision(recommendation.id, "dismissed")}>
-          Dismiss
-        </button>
+        {requiredToday ? (
+          <span className="recommendation-status applied">Applied today</span>
+        ) : decision === "accepted" ? (
+          <>
+            <span className="recommendation-status accepted">Accepted</span>
+            <button onClick={() => onDecision(recommendation.id, "dismissed")}>Keep plan</button>
+          </>
+        ) : decision === "dismissed" ? (
+          <>
+            <span className="recommendation-status dismissed">Keeping plan</span>
+            <button onClick={() => onDecision(recommendation.id, "accepted")}>Accept</button>
+          </>
+        ) : (
+          <>
+            <button onClick={() => onDecision(recommendation.id, "accepted")}>Accept</button>
+            <button onClick={() => onDecision(recommendation.id, "dismissed")}>Keep plan</button>
+          </>
+        )}
       </div>
     </div>
   );

@@ -117,7 +117,10 @@ export interface TrainingPrinciple {
   topic: string
   description: string
   evidenceLevel: EvidenceLevel
-  source: Source
+  source: {
+    name: string
+    year: number
+  }
 }
 
 export interface RecommendationTrace {
@@ -136,6 +139,7 @@ export interface PlanRecommendation {
   score: number
   reasons: string[]
   progression?: Recommendation
+  modifiedSets?: number
   trace: RecommendationTrace
 }
 

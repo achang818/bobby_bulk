@@ -7,6 +7,7 @@ export const decisionRules = {
   'replace-on-stall': 'plateau-variation',
   'add-for-priority-volume': 'volume-hypertrophy',
   'adapt-unavailable-equipment': 'equipment-constraint',
+  'adapt-available-time': 'time-constraint',
 } as const
 
 export type DecisionRuleId = keyof typeof decisionRules

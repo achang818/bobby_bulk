@@ -92,3 +92,7 @@ export function saveRecommendationDecision(recommendationId: string, decision: '
   localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions))
   return decisions
 }
+
+export function loadRecommendationDecisions(): Record<string, string> {
+  return JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '{}') as Record<string, string>
+}
