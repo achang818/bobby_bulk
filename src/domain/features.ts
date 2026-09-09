@@ -29,8 +29,9 @@ export function calculateMuscleFeatures(muscle: string, exercises: Exercise[], h
   const matchingWorkouts = history.filter((workout) => workout.sets.some((set) => matchingIds.has(set.exerciseId)))
   const countSets = (days: number) => history.filter((workout) => daysBetween(workout.date, asOf) <= days && daysBetween(workout.date, asOf) >= 0).flatMap((workout) => workout.sets).filter((set) => matchingIds.has(set.exerciseId)).length
   const dates = matchingWorkouts.map((workout) => workout.date).sort()
+  const dates28 = matchingWorkouts.filter((workout) => daysBetween(workout.date, asOf) <= 28 && daysBetween(workout.date, asOf) >= 0).map((workout) => workout.date)
   const recentSets = countSets(28)
-  return { muscle, recentSets, rolling7DaySets: countSets(7), rolling14DaySets: countSets(14), rolling28DaySets: recentSets, daysSinceTrained: dates.length ? daysBetween(dates.at(-1) as string, asOf) : undefined, frequency28Days: new Set(dates).size, volumeState: classifyMuscleVolume(recentSets) }
+  return { muscle, recentSets, rolling7DaySets: countSets(7), rolling14DaySets: countSets(14), rolling28DaySets: recentSets, daysSinceTrained: dates.length ? daysBetween(dates.at(-1) as string, asOf) : undefined, frequency28Days: new Set(dates28).size, volumeState: classifyMuscleVolume(recentSets) }
 }
 
 export function calculatePlanFeatures(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], asOf?: string) {

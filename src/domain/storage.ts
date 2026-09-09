@@ -18,6 +18,12 @@ export function saveWorkout(workout: Workout, existingWorkouts = loadWorkouts())
   return workouts
 }
 
+export function deleteWorkout(workoutId: string, existingWorkouts = loadWorkouts()): Workout[] {
+  const workouts = existingWorkouts.filter((workout) => workout.id !== workoutId)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
+  return workouts
+}
+
 export function loadSavedTemplates(): WorkoutTemplate[] {
   const stored = localStorage.getItem(TEMPLATE_KEY)
   return stored ? (JSON.parse(stored) as WorkoutTemplate[]) : []
@@ -38,6 +44,12 @@ export function loadPlans(): WorkoutTemplate[] {
 
 export function savePlan(plan: WorkoutTemplate): WorkoutTemplate[] {
   const plans = [plan, ...loadPlans().filter((item) => item.id !== plan.id)]
+  localStorage.setItem(PLAN_KEY, JSON.stringify(plans))
+  return plans
+}
+
+export function deletePlan(planId: string): WorkoutTemplate[] {
+  const plans = loadPlans().filter((plan) => plan.id !== planId)
   localStorage.setItem(PLAN_KEY, JSON.stringify(plans))
   return plans
 }

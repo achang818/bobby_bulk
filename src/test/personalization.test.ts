@@ -53,8 +53,8 @@ describe('plan evaluation', () => {
   it('recommends progression and keep for an exercise with evidence', () => {
     const history = [workout('a', '2026-09-01', bench.id, 8), workout('b', '2026-09-05', bench.id, 9)]
     const result = evaluatePlan(plan, exercises, history, prefs, '2026-09-09')
-    expect(result.some((item) => item.type === 'PROGRESSION')).toBe(true)
-    expect(result.some((item) => item.type === 'KEEP')).toBe(true)
+    expect(result.find((item) => item.type === 'PROGRESSION')?.trace.ruleId).toBe('double-progression')
+    expect(result.find((item) => item.type === 'KEEP')?.trace.ruleId).toBe('keep-stable-exercise')
   })
 
   it('recommends an add only for a stated priority with low volume', () => {
@@ -62,6 +62,7 @@ describe('plan evaluation', () => {
     const add = result.find((item) => item.type === 'ADD')
     expect(add?.exerciseId).toBe(lateralRaise.id)
     expect(add?.reasons.length).toBeGreaterThan(1)
+    expect(add?.trace.ruleId).toBe('add-for-priority-volume')
   })
 
   it('does not recommend a disliked exercise', () => {
@@ -75,5 +76,6 @@ describe('plan evaluation', () => {
     const replacement = result.find((item) => item.type === 'REPLACE')
     expect(replacement?.exerciseId).toBe(bench.id)
     expect(replacement?.alternativeExerciseId).toBeDefined()
+    expect(replacement?.trace.ruleId).toBe('replace-on-stall')
   })
 })

@@ -27,6 +27,7 @@ export interface Workout {
   date: string
   title: string
   notes?: string
+  unit?: WeightUnit
   sets: LoggedSet[]
 }
 
@@ -42,8 +43,10 @@ export interface WorkoutTemplate {
 export type WorkoutPlan = WorkoutTemplate
 
 export type TrainingGoal = 'Build muscle' | 'Get stronger' | 'Improve athletic performance' | 'Improve a specific skill' | 'General fitness'
+export type WeightUnit = 'kg' | 'lb'
 
 export interface UserPreferences {
+  weightUnit: WeightUnit
   goals: TrainingGoal[]
   priorities: string[]
   preferredExerciseIds: string[]
@@ -80,6 +83,30 @@ export interface MuscleFeatures {
 
 export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE'
 
+export type EvidenceLevel = 'A' | 'B' | 'C' | 'D' | 'Personal'
+
+export interface Source {
+  name: string
+  year?: number
+  url?: string
+}
+
+export interface TrainingPrinciple {
+  id: string
+  topic: string
+  description: string
+  evidenceLevel: EvidenceLevel
+  source: Source
+}
+
+export interface RecommendationTrace {
+  ruleId: string
+  principleId: string
+  principleDescription: string
+  evidenceLevel: EvidenceLevel
+  source: Source
+}
+
 export interface PlanRecommendation {
   id: string
   type: PlanRecommendationType
@@ -88,6 +115,7 @@ export interface PlanRecommendation {
   score: number
   reasons: string[]
   progression?: Recommendation
+  trace: RecommendationTrace
 }
 
 export interface Recommendation {
