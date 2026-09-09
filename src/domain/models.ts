@@ -115,6 +115,8 @@ export interface UserPreferences {
 export type ExerciseProgressState = 'progressing' | 'stable' | 'stalled' | 'regressing' | 'insufficient history'
 export type MuscleVolumeState = 'low recent volume' | 'moderate recent volume' | 'high recent volume' | 'insufficient history'
 export type PreferenceState = 'preferred' | 'neutral' | 'disliked' | 'unknown'
+export type HistoryConfidence = 'none' | 'limited' | 'moderate' | 'strong'
+export type WorkloadTrend = 'increasing' | 'stable' | 'decreasing' | 'insufficient history'
 
 export interface ExerciseFeatures {
   exerciseId: string
@@ -126,6 +128,9 @@ export interface ExerciseFeatures {
   averageWeight?: number
   estimatedOneRepMax?: number
   progressionState: ExerciseProgressState
+  recentWorkingSets: { date: string; weight: number; reps: number }[]
+  recentBestWorkingLoad?: number
+  historyConfidence: HistoryConfidence
 }
 
 export interface MuscleFeatures {
@@ -135,9 +140,28 @@ export interface MuscleFeatures {
   rolling14DaySets: number
   rolling28DaySets: number
   daysSinceTrained?: number
+  frequency7Days: number
   frequency14Days: number
   frequency28Days: number
   volumeState: MuscleVolumeState
+  workloadTrend: WorkloadTrend
+  historyConfidence: HistoryConfidence
+}
+
+export interface PlannedVsActualExercise {
+  exerciseId: string
+  plannedSets: number
+  plannedRepRange: { min: number; max: number }
+  completedWorkingSets: number
+  targetRangeWorkingSets: number
+  fullyCompleted: boolean
+  demonstratedWorkingLoad?: number
+}
+
+export interface TrainingState {
+  asOf: string
+  exercises: ExerciseFeatures[]
+  muscles: MuscleFeatures[]
 }
 
 export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY'
