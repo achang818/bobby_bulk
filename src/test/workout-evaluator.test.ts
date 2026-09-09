@@ -20,7 +20,7 @@ describe('evaluateWorkout', () => {
     expect(finding?.evidence.length).toBe(3)
   })
   it('flags isolation work before a compound unless grouped together', () => {
-    const result = evaluateWorkout(plan(['cable-lateral-raise', 'barbell-bench-press']), exercises)
+    const result = evaluateWorkout(plan(['triceps-pushdown', 'barbell-bench-press']), exercises)
     expect(result.findings.some((item) => item.category === 'ordering')).toBe(true)
   })
   it('reports duration pressure and handles an empty workout', () => {

@@ -221,7 +221,7 @@ function EvaluatedTodayView({ plan, exerciseIds, setTargets, recommendations, de
         const panel = document.createElement("section");
         panel.className = "mini-panel workout-health-panel";
         const warnings = workoutHealth.findings.filter((finding) => finding.severity !== "info");
-        panel.innerHTML = `<div class="panel-title"><span>Workout health</span><span>${workoutHealth.plannedSets} sets</span></div><p class="workout-health-coverage">${Object.entries(workoutHealth.primaryMuscleSets).map(([muscle, sets]) => `${muscle} ${sets}`).join(" · ") || "No direct working sets"}</p>${warnings.length ? warnings.map((finding) => `<div class="workout-health-finding ${finding.severity}"><strong>${finding.title}</strong><span>${finding.description}</span></div>`).join("") : "<p class=\"workout-health-ok\">No structural concerns identified.</p>"}`;
+        panel.innerHTML = `<div class="panel-title"><span>Workout focus</span><span>${workoutHealth.plannedSets} sets</span></div><p class="workout-health-coverage">${Object.entries(workoutHealth.primaryMuscleSets).map(([muscle, sets]) => `${muscle} ${sets}`).join(" · ") || "No direct working sets"}</p>${warnings.length ? warnings.map((finding) => `<div class="workout-health-finding ${finding.severity}"><strong>${finding.title}</strong><span>${finding.description}</span></div>`).join("") : "<p class=\"workout-health-ok\">No structural concerns identified.</p>"}`;
         column.insertBefore(panel, column.children[1] ?? null);
         return () => panel.remove();
     }, [workoutHealth]);
