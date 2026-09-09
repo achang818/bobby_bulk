@@ -1,3 +1,5 @@
+import { exercises } from './exercises'
+import { normalizeWorkoutSession, normalizeWorkoutTemplate } from './workout-session'
 import type { Gym, PlanRecommendation, RecommendationDecision, RecommendationDecisionType, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
 import { defaultPreferences } from './preferences'
 
@@ -11,7 +13,10 @@ const TODAYS_CONTEXT_KEY = 'bobby-bulk-todays-context'
 
 export function loadWorkouts(): Workout[] {
   const stored = localStorage.getItem(STORAGE_KEY)
-  return stored ? (JSON.parse(stored) as Workout[]) : []
+  if (!stored) return []
+  const workouts = (JSON.parse(stored) as unknown[]).map(normalizeWorkoutSession)
+  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
+  return workouts
 }
 
 export function saveWorkout(workout: Workout, existingWorkouts = loadWorkouts()): Workout[] {
@@ -28,7 +33,10 @@ export function deleteWorkout(workoutId: string, existingWorkouts = loadWorkouts
 
 export function loadSavedTemplates(): WorkoutTemplate[] {
   const stored = localStorage.getItem(TEMPLATE_KEY)
-  return stored ? (JSON.parse(stored) as WorkoutTemplate[]) : []
+  if (!stored) return []
+  const templates = (JSON.parse(stored) as unknown[]).map((template) => normalizeWorkoutTemplate(template, exercises))
+  localStorage.setItem(TEMPLATE_KEY, JSON.stringify(templates))
+  return templates
 }
 
 export function toggleSavedTemplate(template: WorkoutTemplate): WorkoutTemplate[] {
@@ -41,7 +49,10 @@ export function toggleSavedTemplate(template: WorkoutTemplate): WorkoutTemplate[
 
 export function loadPlans(): WorkoutTemplate[] {
   const stored = localStorage.getItem(PLAN_KEY)
-  return stored ? (JSON.parse(stored) as WorkoutTemplate[]) : []
+  if (!stored) return []
+  const plans = (JSON.parse(stored) as unknown[]).map((plan) => normalizeWorkoutTemplate(plan, exercises))
+  localStorage.setItem(PLAN_KEY, JSON.stringify(plans))
+  return plans
 }
 
 export function savePlan(plan: WorkoutTemplate): WorkoutTemplate[] {

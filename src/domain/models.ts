@@ -40,27 +40,57 @@ export interface TodaysContext {
 export interface LoggedSet {
   id: string
   exerciseId: string
+  setType: SetType
   weight: number
   reps: number
   rir?: number
+  rpe?: number
   setDurationSeconds?: number
   restDurationSeconds?: number
+  notes?: string
+  completedAt?: string
 }
 
-export interface Workout {
+export type SetType = 'warm-up' | 'working' | 'drop' | 'failure'
+
+export interface PlannedExercise {
+  exerciseId: string
+  order: number
+  sets: number
+  repRange: { min: number; max: number }
+  setType: SetType
+  groupId?: string
+  notes?: string
+}
+
+export interface WorkoutSession {
   id: string
+  /** Always populated for new sessions; optional only while legacy history is normalized. */
+  workoutId?: string
   date: string
   title: string
+  status?: 'in-progress' | 'completed'
+  startedAt?: string
+  completedAt?: string
   notes?: string
   unit?: WeightUnit
+  /** Snapshot of the plan when the session began; legacy history has none. */
+  plannedExercises?: PlannedExercise[]
   sets: LoggedSet[]
 }
+
+// Existing progression and recommendation functions use this alias while they
+// consume completed WorkoutSession records as history.
+export type Workout = WorkoutSession
 
 export interface WorkoutTemplate {
   id: string
   name: string
   description: string
   focus: string
+  /** Canonical plan representation. Legacy `exerciseIds` are normalized on load. */
+  plannedExercises?: PlannedExercise[]
+  /** Transitional projection for existing recommendation code and persisted plans. */
   exerciseIds: string[]
   saved?: boolean
 }

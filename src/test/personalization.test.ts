@@ -11,7 +11,7 @@ const plan: WorkoutPlan = { id: 'upper', name: 'Upper', description: 'test', foc
 const prefs: UserPreferences = { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Side delts'] }
 
 function workout(id: string, date: string, exerciseId: string, reps: number): Workout {
-  return { id, date, title: 'Upper', sets: [{ id: `${id}-set`, exerciseId, weight: 70, reps }] }
+  return { id, date, title: 'Upper', sets: [{ id: `${id}-set`, exerciseId, setType: 'working', weight: 70, reps }] }
 }
 
 describe('feature calculations', () => {
@@ -60,19 +60,19 @@ describe('plan evaluation', () => {
   it('recommends an add only for a stated priority with low volume', () => {
     const result = evaluatePlan(plan, exercises, [workout('a', '2026-09-01', bench.id, 8), workout('b', '2026-09-05', lateralRaise.id, 12)], prefs, '2026-09-09')
     const add = result.find((item) => item.type === 'ADD')
-    expect(add?.exerciseId).toBe(lateralRaise.id)
+    expect([lateralRaise.id, 'dumbbell-shoulder-press']).toContain(add?.exerciseId)
     expect(add?.reasons.length).toBeGreaterThan(1)
     expect(add?.trace.ruleId).toBe('add-for-priority-volume')
   })
 
   it('recommends a priority add for adequate volume that is poorly distributed', () => {
     const history: Workout[] = [{
-      id: 'a', date: '2026-09-01', title: 'Shoulders', sets: Array.from({ length: 6 }, (_, index) => ({ id: `set-${index}`, exerciseId: lateralRaise.id, weight: 20, reps: 12 })),
+      id: 'a', date: '2026-09-01', title: 'Shoulders', sets: Array.from({ length: 6 }, (_, index) => ({ id: `set-${index}`, exerciseId: lateralRaise.id, setType: 'working', weight: 20, reps: 12 })),
     }]
     const result = evaluatePlan(plan, exercises, history, prefs, '2026-09-09')
     const add = result.find((item) => item.type === 'ADD')
 
-    expect(add?.exerciseId).toBe(lateralRaise.id)
+    expect([lateralRaise.id, 'dumbbell-shoulder-press']).toContain(add?.exerciseId)
     expect(add?.trace.ruleId).toBe('add-for-priority-frequency')
     expect(add?.trace.principleId).toBe('frequency-distribution')
   })

@@ -13,9 +13,9 @@ describe('recommendNext', () => {
   it('holds weight and asks for more reps below the top of the range', () => {
     const workout: Workout = {
       id: 'w1', date: '2026-09-01', title: 'Upper', sets: [
-        { id: '1', exerciseId: bench.id, weight: 70, reps: 8 },
-        { id: '2', exerciseId: bench.id, weight: 70, reps: 8 },
-        { id: '3', exerciseId: bench.id, weight: 70, reps: 7 },
+        { id: '1', exerciseId: bench.id, setType: 'working', weight: 70, reps: 8 },
+        { id: '2', exerciseId: bench.id, setType: 'working', weight: 70, reps: 8 },
+        { id: '3', exerciseId: bench.id, setType: 'working', weight: 70, reps: 7 },
       ],
     }
     const recommendation = recommendNext(bench, [workout])
@@ -26,9 +26,9 @@ describe('recommendNext', () => {
   it('increases weight after all prescribed sets reach the top', () => {
     const workout: Workout = {
       id: 'w1', date: '2026-09-01', title: 'Upper', sets: [
-        { id: '1', exerciseId: bench.id, weight: 70, reps: 10 },
-        { id: '2', exerciseId: bench.id, weight: 70, reps: 10 },
-        { id: '3', exerciseId: bench.id, weight: 70, reps: 10 },
+        { id: '1', exerciseId: bench.id, setType: 'working', weight: 70, reps: 10 },
+        { id: '2', exerciseId: bench.id, setType: 'working', weight: 70, reps: 10 },
+        { id: '3', exerciseId: bench.id, setType: 'working', weight: 70, reps: 10 },
       ],
     }
     expect(recommendNext(bench, [workout]).weight).toBe(75)
@@ -37,9 +37,9 @@ describe('recommendNext', () => {
   it('uses the gym load increments instead of inventing an unavailable load', () => {
     const workout: Workout = {
       id: 'w1', date: '2026-09-01', title: 'Upper', sets: [
-        { id: '1', exerciseId: bench.id, weight: 70, reps: 10 },
-        { id: '2', exerciseId: bench.id, weight: 70, reps: 10 },
-        { id: '3', exerciseId: bench.id, weight: 70, reps: 10 },
+        { id: '1', exerciseId: bench.id, setType: 'working', weight: 70, reps: 10 },
+        { id: '2', exerciseId: bench.id, setType: 'working', weight: 70, reps: 10 },
+        { id: '3', exerciseId: bench.id, setType: 'working', weight: 70, reps: 10 },
       ],
     }
     expect(recommendNext(bench, [workout], [{ equipment: 'dumbbells', increments: [65, 70] }]).weight).toBe(70)
@@ -48,7 +48,7 @@ describe('recommendNext', () => {
   it('ignores optional timing and RIR when they are missing', () => {
     const workout: Workout = {
       id: 'w1', date: '2026-09-01', title: 'Upper', sets: [
-        { id: '1', exerciseId: bench.id, weight: 70, reps: 8 },
+        { id: '1', exerciseId: bench.id, setType: 'working', weight: 70, reps: 8 },
       ],
     }
     expect(() => recommendNext(bench, [workout])).not.toThrow()
