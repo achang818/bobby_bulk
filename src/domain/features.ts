@@ -1,5 +1,6 @@
 import type { Exercise, ExerciseFeatures, MuscleFeatures, Workout, WorkoutPlan } from './models'
 import { classifyExerciseProgression, classifyMuscleVolume } from './states'
+import { planExerciseIds, plannedExercisesFor } from './workout-session'
 
 const DAY = 24 * 60 * 60 * 1000
 
@@ -36,9 +37,14 @@ export function calculateMuscleFeatures(muscle: string, exercises: Exercise[], h
 }
 
 export function calculatePlanFeatures(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], asOf?: string) {
-  const planExercises = plan.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)).filter((exercise): exercise is Exercise => Boolean(exercise))
-  const muscles = [...new Set(planExercises.flatMap((exercise) => exercise.primaryMuscles))]
-  return { planId: plan.id, exerciseIds: plan.exerciseIds, muscles, approximateSets: planExercises.reduce((sum, exercise) => sum + exercise.defaultSets, 0), exerciseFeatures: planExercises.map((exercise) => calculateExerciseFeatures(exercise, history, asOf)), overlappingExercises: plan.exerciseIds.filter((id, index) => plan.exerciseIds.indexOf(id) !== index) }
+  const plannedExercises = plannedExercisesFor(plan, exercises)
+  const ids = planExerciseIds(plan)
+  const planExercises = plannedExercises.flatMap((planned) => {
+    const exercise = exercises.find((item) => item.id === planned.exerciseId)
+    return exercise ? [{ exercise, planned }] : []
+  })
+  const muscles = [...new Set(planExercises.flatMap(({ exercise }) => exercise.primaryMuscles))]
+  return { planId: plan.id, exerciseIds: ids, plannedExercises, muscles, approximateSets: plannedExercises.reduce((sum, planned) => sum + planned.sets, 0), exerciseFeatures: planExercises.map(({ exercise }) => calculateExerciseFeatures(exercise, history, asOf)), overlappingExercises: ids.filter((id, index) => ids.indexOf(id) !== index) }
 }
 
 function latestDate(history: Workout[]) { return history.map((workout) => workout.date).sort().at(-1) ?? new Date().toISOString().slice(0, 10) }

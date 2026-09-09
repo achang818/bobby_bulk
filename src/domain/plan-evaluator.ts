@@ -2,16 +2,22 @@ import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { recommendNext } from './progression'
 import { buildTrace } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
+import { plannedExercisesFor } from './workout-session'
 import type { AvailableLoad, Exercise, PlanRecommendation, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
 
 export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): PlanRecommendation[] {
   const recommendations: PlanRecommendation[] = []
-  const planExercises = plan.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)).filter((exercise): exercise is Exercise => Boolean(exercise))
-  const otherPlanMuscles = new Set(planExercises.flatMap((exercise) => exercise.primaryMuscles.map((muscle) => muscle.toLowerCase())))
+  const plannedExercises = plannedExercisesFor(plan, exercises)
+  const planExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
+  const planExercises = plannedExercises.flatMap((planned) => {
+    const exercise = exercises.find((item) => item.id === planned.exerciseId)
+    return exercise ? [{ exercise, planned }] : []
+  })
+  const otherPlanMuscles = new Set(planExercises.flatMap(({ exercise }) => exercise.primaryMuscles.map((muscle) => muscle.toLowerCase())))
 
-  for (const exercise of planExercises) {
+  for (const { exercise, planned } of planExercises) {
     const features = calculateExerciseFeatures(exercise, history, asOf)
-    const progression = recommendNext(exercise, history, availableLoads)
+    const progression = recommendNext(exercise, planned, history, availableLoads)
     const goalAligned = preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number]))
     const preferenceState = classifyPreference(exercise.id, preferences, decisions)
     if (features.sessionsPerformed > 0 && progression.action !== 'start-here') {
@@ -24,7 +30,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     }
     if (features.sessionsPerformed >= 3 && features.progressionState === 'stalled' && preferenceState !== 'disliked' && rejectedKeepCount(exercise.id, decisions) < 2) {
       const alternatives = exercises
-        .filter((candidate) => candidate.id !== exercise.id && !plan.exerciseIds.includes(candidate.id) && candidate.category === exercise.category && candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)) && classifyPreference(candidate.id, preferences, decisions) !== 'disliked')
+        .filter((candidate) => candidate.id !== exercise.id && !planExerciseIds.has(candidate.id) && candidate.category === exercise.category && candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)) && classifyPreference(candidate.id, preferences, decisions) !== 'disliked')
         .sort((a, b) => specificityScore(b, exercise) - specificityScore(a, exercise))
       const alternative = alternatives[0]
       if (alternative) {
@@ -37,11 +43,11 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
 
   for (const priority of preferences.priorities) {
     const muscle = calculateMuscleFeatures(priority, exercises, history, asOf)
-    const represented = planExercises.some((exercise) => exercise.primaryMuscles.some((item) => item.toLowerCase() === priority.toLowerCase()))
+    const represented = planExercises.some(({ exercise }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === priority.toLowerCase()))
     const normalizedPriority = priority.toLowerCase()
-    const priorityCandidates = exercises.filter((exercise) => !plan.exerciseIds.includes(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'disliked' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number]))))
+    const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'disliked' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number]))))
     // Sparse plans have too little existing context to constrain a legitimate priority add.
-    const shouldCheckCoherence = planExercises.length >= 2 && otherPlanMuscles.size > 0
+    const shouldCheckCoherence = plannedExercises.length >= 2 && otherPlanMuscles.size > 0
     const coherentCandidates = shouldCheckCoherence
       // Secondary muscles can establish session fit, but never count as direct volume.
       ? priorityCandidates.filter((candidate) => [...candidate.primaryMuscles.filter((muscleName) => muscleName.toLowerCase() !== normalizedPriority), ...candidate.secondaryMuscles].some((muscleName) => otherPlanMuscles.has(muscleName.toLowerCase())))

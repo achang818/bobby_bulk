@@ -1,9 +1,32 @@
-import type { Exercise, LoggedSet, PlannedExercise, SetType, WorkoutSession, WorkoutTemplate } from './models'
+import type { Exercise, LoggedSet, PlanRecommendation, PlannedExercise, SetType, WorkoutSession, WorkoutTemplate } from './models'
 
 const defaultRepRange = { min: 8, max: 12 }
 
 export function planExerciseIds(plan: WorkoutTemplate): string[] {
-  return plan.plannedExercises?.slice().sort((a, b) => a.order - b.order).map((exercise) => exercise.exerciseId) ?? plan.exerciseIds
+  return plannedExercisesFor(plan).map((exercise) => exercise.exerciseId)
+}
+
+/** The single boundary where legacy id-only plans become structured slots. */
+export function plannedExercisesFor(plan: WorkoutTemplate, exercises: Exercise[] = []): PlannedExercise[] {
+  const byId = new Map(exercises.map((exercise) => [exercise.id, exercise]))
+  return plan.plannedExercises?.slice().sort((a, b) => a.order - b.order)
+    ?? plan.exerciseIds.map((id, order) => createPlannedExercise(id, order, byId.get(id)))
+}
+
+export function synchronizePlan(plan: WorkoutTemplate, exercises: Exercise[] = []): WorkoutTemplate {
+  const plannedExercises = plannedExercisesFor(plan, exercises)
+  return { ...plan, plannedExercises, exerciseIds: plannedExercises.map((exercise) => exercise.exerciseId) }
+}
+
+export function resolveWorkoutForToday(plan: WorkoutTemplate, recommendations: PlanRecommendation[], exercises: Exercise[] = []): WorkoutTemplate {
+  const resolved = plannedExercisesFor(plan, exercises)
+    .flatMap((planned) => {
+      const recommendation = recommendations.find((item) => item.exerciseId === planned.exerciseId && ['REPLACE', 'REMOVE', 'MODIFY'].includes(item.type))
+      if (recommendation?.type === 'REMOVE') return []
+      return [{ ...planned, ...(recommendation?.type === 'REPLACE' && recommendation.alternativeExerciseId ? { exerciseId: recommendation.alternativeExerciseId } : {}), ...(recommendation?.type === 'MODIFY' && recommendation.modifiedSets !== undefined ? { sets: recommendation.modifiedSets } : {}) }]
+    })
+    .map((planned, order) => ({ ...planned, order }))
+  return synchronizePlan({ ...plan, plannedExercises: resolved }, exercises)
 }
 
 export function createPlannedExercise(exerciseId: string, order: number, exercise?: Exercise): PlannedExercise {
@@ -29,7 +52,7 @@ export function normalizeWorkoutTemplate(value: unknown, exercises: Exercise[] =
       sets: item.sets ?? byId.get(item.exerciseId ?? '')?.defaultSets ?? 3,
     })).filter((item) => item.exerciseId)
     : (raw.exerciseIds ?? []).map((id, index) => createPlannedExercise(id, index, byId.get(id)))
-  return {
+  return synchronizePlan({
     id: raw.id ?? crypto.randomUUID(),
     name: raw.name ?? 'Untitled workout',
     description: raw.description ?? '',
@@ -37,7 +60,7 @@ export function normalizeWorkoutTemplate(value: unknown, exercises: Exercise[] =
     plannedExercises,
     exerciseIds: plannedExercises.slice().sort((a, b) => a.order - b.order).map((item) => item.exerciseId),
     ...(raw.saved === undefined ? {} : { saved: raw.saved }),
-  }
+  }, exercises)
 }
 
 export function createWorkoutSession(workout: WorkoutTemplate, plannedExercises = workout.plannedExercises ?? []): WorkoutSession {

@@ -1,5 +1,6 @@
 import { buildTrace } from './rules'
 import { classifyPreference } from './states'
+import { planExerciseIds, plannedExercisesFor } from './workout-session'
 import type { EquipmentTag, Exercise, PlanRecommendation, TodaysContext, UserPreferences, WorkoutPlan } from './models'
 
 // The limit protects a familiar workout from unnecessary churn; it is contextual, not universal.
@@ -45,8 +46,10 @@ export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysCon
   let substitutions = 0
   const trace = buildTrace('adapt-unavailable-equipment')
   // Preserve distinct movement slots: do not substitute in an exercise already planned today.
-  const selectedSubstituteIds = new Set<string>(plan.exerciseIds)
-  return plan.exerciseIds.flatMap((exerciseId) => {
+  const plannedExercises = plannedExercisesFor(plan, exercises)
+  const selectedSubstituteIds = new Set<string>(planExerciseIds(plan))
+  return plannedExercises.flatMap((planned) => {
+    const exerciseId = planned.exerciseId
     if (substitutions >= limit) return []
     const exercise = exercises.find((item) => item.id === exerciseId)
     if (!exercise) return []
@@ -67,10 +70,8 @@ export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysCon
 }
 
 export function estimateTypicalDuration(plan: WorkoutPlan, exercises: Exercise[]): number {
-  const planExercises = plan.exerciseIds
-    .map((id) => exercises.find((exercise) => exercise.id === id))
-    .filter((exercise): exercise is Exercise => Boolean(exercise))
-  return planExercises.reduce((minutes, exercise) => minutes + exercise.defaultSets * MINUTES_PER_WORKING_SET, 0) + planExercises.length * MINUTES_PER_EXERCISE_TRANSITION
+  const planExercises = plannedExercisesFor(plan, exercises)
+  return planExercises.reduce((minutes, planned) => minutes + planned.sets * MINUTES_PER_WORKING_SET, 0) + planExercises.length * MINUTES_PER_EXERCISE_TRANSITION
 }
 
 export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], availableMinutes: number | undefined, goalCriticalExerciseIds: string[] = []): PlanRecommendation[] {
@@ -79,37 +80,38 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
   if (availableMinutes >= typicalDuration) return []
 
   const goalCritical = new Set(goalCriticalExerciseIds)
-  const planExercises = plan.exerciseIds
-    .map((id) => exercises.find((exercise) => exercise.id === id))
-    .filter((exercise): exercise is Exercise => Boolean(exercise))
+  const planExercises = plannedExercisesFor(plan, exercises).flatMap((planned) => {
+    const exercise = exercises.find((item) => item.id === planned.exerciseId)
+    return exercise ? [{ exercise, planned }] : []
+  })
   const trace = buildTrace('adapt-available-time')
-  const orderedExercises = [...planExercises].sort((a, b) => protectionScore(a, goalCritical) - protectionScore(b, goalCritical))
+  const orderedExercises = [...planExercises].sort((a, b) => protectionScore(a.exercise, goalCritical) - protectionScore(b.exercise, goalCritical))
   const modifications = new Map<string, PlanRecommendation>()
   const removals: PlanRecommendation[] = []
   let minutesToSave = typicalDuration - availableMinutes
 
-  for (const exercise of orderedExercises) {
+  for (const { exercise, planned } of orderedExercises) {
     if (minutesToSave <= 0) break
-    const reducibleSets = Math.max(0, exercise.defaultSets - 1)
+    const reducibleSets = Math.max(0, planned.sets - 1)
     if (reducibleSets === 0) continue
     const setsToRemove = Math.min(reducibleSets, Math.ceil(minutesToSave / MINUTES_PER_WORKING_SET))
-    const remainingSets = exercise.defaultSets - setsToRemove
+    const remainingSets = planned.sets - setsToRemove
     modifications.set(exercise.id, {
       id: `time-modify-${plan.id}-${exercise.id}`,
       type: 'MODIFY',
       exerciseId: exercise.id,
       modifiedSets: remainingSets,
       score: 5,
-      reasons: [`Reduce ${exercise.name} from ${exercise.defaultSets} sets to ${remainingSets} to fit today's ${availableMinutes}-minute limit.`, 'Lower-priority work is trimmed before an exercise is removed.'],
+      reasons: [`Reduce ${exercise.name} from ${planned.sets} sets to ${remainingSets} to fit today's ${availableMinutes}-minute limit.`, 'Lower-priority work is trimmed before an exercise is removed.'],
       trace,
     })
     minutesToSave -= setsToRemove * MINUTES_PER_WORKING_SET
   }
 
   if (minutesToSave > 0) {
-    for (const exercise of orderedExercises) {
+    for (const { exercise, planned } of orderedExercises) {
       if (minutesToSave <= 0) break
-      const remainingSets = modifications.get(exercise.id)?.modifiedSets ?? exercise.defaultSets
+      const remainingSets = modifications.get(exercise.id)?.modifiedSets ?? planned.sets
       // A full removal supersedes a prior set reduction for the same exercise.
       modifications.delete(exercise.id)
       removals.push({

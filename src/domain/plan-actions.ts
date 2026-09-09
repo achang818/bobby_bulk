@@ -1,5 +1,5 @@
 import type { PlanRecommendation, WorkoutTemplate } from './models'
-import { createPlannedExercise, normalizeWorkoutTemplate, planExerciseIds } from './workout-session'
+import { createPlannedExercise, normalizeWorkoutTemplate, planExerciseIds, synchronizePlan } from './workout-session'
 
 export function applyAcceptedRecommendation(plan: WorkoutTemplate, recommendation: PlanRecommendation): WorkoutTemplate {
   const normalizedPlan = normalizeWorkoutTemplate(plan)
@@ -14,11 +14,11 @@ export function applyAcceptedRecommendation(plan: WorkoutTemplate, recommendatio
         : synchronizePlan({ ...normalizedPlan, plannedExercises: [...normalizedPlan.plannedExercises!, createPlannedExercise(recommendation.exerciseId, normalizedPlan.plannedExercises!.length)] })
     case 'REMOVE':
       return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.filter((exercise) => exercise.exerciseId !== recommendation.exerciseId).map((exercise, order) => ({ ...exercise, order })) })
+    case 'MODIFY':
+      return recommendation.modifiedSets === undefined
+        ? normalizedPlan
+        : synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === recommendation.exerciseId ? { ...exercise, sets: recommendation.modifiedSets as number } : exercise) })
     default:
       return normalizedPlan
   }
-}
-
-function synchronizePlan(plan: WorkoutTemplate): WorkoutTemplate {
-  return { ...plan, exerciseIds: planExerciseIds(plan) }
 }
