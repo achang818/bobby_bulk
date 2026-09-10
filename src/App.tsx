@@ -366,8 +366,10 @@ function HistoryView({ workouts, unit, onUpdate, onDelete, }: {
         const [newExerciseId, setNewExerciseId] = useState(exercises[0].id);
         const [newWeight, setNewWeight] = useState("");
         const [newReps, setNewReps] = useState("");
-        const sortedWorkouts = [...workouts].sort((a, b) => b.date.localeCompare(a.date) || (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
-        const selectedWorkout = sortedWorkouts.find((workout) => workout.id === selectedWorkoutId);
+        const [visibleWorkoutCount, setVisibleWorkoutCount] = useState(20);
+        const allWorkouts = [...workouts].sort((a, b) => b.date.localeCompare(a.date) || (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
+        const sortedWorkouts = allWorkouts.slice(0, visibleWorkoutCount);
+        const selectedWorkout = allWorkouts.find((workout) => workout.id === selectedWorkoutId);
         const plannedComparison = selectedWorkout ? comparePlannedVsActual(selectedWorkout) : [];
         function selectWorkout(workout: Workout) {
                 setSelectedWorkoutId(workout.id);
@@ -410,6 +412,7 @@ function HistoryView({ workouts, unit, onUpdate, onDelete, }: {
                         <div className="workout-info"><strong>{workout.title}</strong><span>{new Set(workout.sets.map((set) => set.exerciseId)).size} exercises · {workout.sets.length} sets · {workout.unit ?? unit}</span></div>
                         <button className="delete-button" onClick={(event) => { event.stopPropagation(); if (window.confirm(`Delete ${workout.title} from history?`)) onDelete(workout.id); }} aria-label={`Delete ${workout.title} on ${workout.date}`}>×</button>
                     </article>)}
+                    {allWorkouts.length > sortedWorkouts.length && <button className="history-show-more" onClick={() => setVisibleWorkoutCount((current) => current + 20)}>Show 20 more workouts</button>}
                 </section>
                 <aside className="progression-detail history-detail">
                     {selectedWorkout ? <>
@@ -445,7 +448,8 @@ export function LegacyHistoryView({ workouts, unit, onDelete, }: {
                 }
             }} aria-label={`Delete ${workout.title} on ${workout.date}`}>                ×              </button>            </article>))}        </section>        <aside className="progression-detail">          <div className="section-heading">            <h2>Exercise progression</h2>          </div>          <select value={selectedExerciseId ?? ""} onChange={(event) => setSelectedExerciseId(event.target.value || null)}>            <option value="">Select an exercise</option>            {exercises.map((exercise) => (<option key={exercise.id} value={exercise.id}>                {exercise.name}              </option>))}          </select>          {selected ? (<div className="progression-content">              <p className="eyebrow">{selected.name}</p>              <div className="progression-stat">                <strong>                  {exerciseSets.length ? exerciseSets[0].weight : 0}                </strong>                <span>{unit} latest load</span>              </div>              {exerciseSets.slice(0, 8).map((set) => (<div className="progression-set" key={`${set.id}-${set.date}`}>                  <span>{formatDate(set.date)}</span>                  <strong>                    {set.weight} {unit} × {set.reps}                  </strong>                </div>))}            </div>) : (<p className="empty-state">              Choose an exercise to see its set-by-set progression.            </p>)}        </aside>      </div>    </>);
 }
-function ExercisesView() {
+export function LegacyExercisesViewWithDom() {
+    /* Legacy implementation retained in source history only. The active view below renders history declaratively. 
     const [query, setQuery] = useState("");
     const [filter, setFilter] = useState("All");
     const [expandedId, setExpandedId] = useState<string | null>(null);
@@ -484,7 +488,7 @@ function ExercisesView() {
     });
     return (<>      <section className="page-intro compact">        <div>          <p className="eyebrow">Exercise database</p>          <h1>Every movement, in one place.</h1>          <p className="lede">            Search by movement, muscle, or equipment. Open an exercise to            inspect its training context.          </p>        </div>      </section>      <div className="library-toolbar">        <label className="search-field">          <span>⌕</span>          <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search exercises, muscles, equipment..." aria-label="Search exercises"/>          {query && (<button onClick={() => setQuery("")} aria-label="Clear search">              ×            </button>)}        </label>        <div className="filter-row">          {categories.map((category) => (<button key={category} className={filter === category ? "filter-chip active" : "filter-chip"} onClick={() => setFilter(category)}>              {category}            </button>))}        </div>      </div>      <div className="result-line">        <span>{filteredExercises.length} movements</span>        <span>Click a row for details</span>      </div>      <div className="exercise-library">        {filteredExercises.map((exercise) => {
             const expanded = expandedId === exercise.id;
-            const state = calculateExerciseFeatures(exercise, workouts);
+            const state = { ...calculateExerciseFeatures(exercise, workouts), recentBestWorkingLoad: calculateExerciseFeatures(exercise, workouts).bestWorkingWeight };
             return (<article className={expanded ? "library-card expanded" : "library-card"} key={exercise.id}>
                 <button className="exercise-row-trigger" onClick={() => setExpandedId(expanded ? null : exercise.id)} aria-expanded={expanded}>
                     <span className="library-icon">{exercise.type === "compound" ? "◎" : "◒"}</span>
@@ -504,6 +508,54 @@ function ExercisesView() {
             </article>);
         })}        {filteredExercises.length === 0 && (<div className="no-results">            <strong>No movements found</strong>            <span>Try a different name, muscle, or equipment.</span>          </div>)}      </div>    </>);
 }
+    */
+    return <ExercisesView />;
+}
+function ExercisesView() {
+    const [query, setQuery] = useState("");
+    const [filter, setFilter] = useState("All");
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const workouts = useMemo(() => loadWorkouts(), []);
+    const categories = ["All", ...new Set(exercises.map((exercise) => exercise.category))];
+    const visible = exercises.filter((exercise) => `${exercise.name} ${exercise.category} ${exercise.equipment} ${exercise.primaryMuscles.join(" ")}`.toLowerCase().includes(query.toLowerCase()) && (filter === "All" || exercise.category === filter));
+    return <>
+        <section className="page-intro compact"><div><p className="eyebrow">Exercise database</p><h1>Every movement, in one place.</h1><p className="lede">Open an exercise to inspect the same history evidence Bobby uses.</p></div></section>
+        <div className="library-toolbar"><label className="search-field"><span>⌕</span><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search exercises, muscles, equipment..." aria-label="Search exercises" />{query && <button onClick={() => setQuery("")} aria-label="Clear search">×</button>}</label><div className="filter-row">{categories.map((category) => <button key={category} className={filter === category ? "filter-chip active" : "filter-chip"} onClick={() => setFilter(category)}>{category}</button>)}</div></div>
+        <div className="result-line"><span>{visible.length} movements</span><span>Click a row for details</span></div>
+        <div className="exercise-library">{visible.map((exercise) => {
+            const expanded = expandedId === exercise.id;
+            const features = calculateExerciseFeatures(exercise, workouts);
+            return <article className={expanded ? "library-card expanded" : "library-card"} key={exercise.id}>
+                <button className="exercise-row-trigger" onClick={() => setExpandedId(expanded ? null : exercise.id)} aria-expanded={expanded}><span className="library-icon">{exercise.type === "compound" ? "◎" : "◒"}</span><span className="library-copy"><span className="card-kicker">{exercise.type} · {exercise.category}</span><strong>{exercise.name}</strong><small>{exercise.equipment}</small></span><span className="expand-mark">{expanded ? "−" : "+"}</span></button>
+                {expanded && <div className="exercise-details"><div><span className="detail-label">Primary muscles</span><div className="tag-list">{exercise.primaryMuscles.map((muscle) => <span key={muscle}>{muscle}</span>)}</div></div><div className="detail-grid"><div><span className="detail-label">Goals</span><strong>{exercise.goals.join(" · ")}</strong></div><div><span className="detail-label">Working range</span><strong>{exercise.defaultSets} sets · {exercise.repRange.min}–{exercise.repRange.max} reps</strong></div><div><span className="detail-label">Equipment</span><strong>{exercise.equipment}</strong></div><div><span className="detail-label">Pattern</span><strong>{exercise.category}</strong></div></div><ExerciseHistoryEvidence features={features} /></div>}
+            </article>;
+        })}{visible.length === 0 && <div className="no-results"><strong>No movements found</strong><span>Try a different name, muscle, or equipment.</span></div>}</div>
+    </>;
+}
+
+export function LegacyExerciseHistoryEvidence({ features }: { features: ReturnType<typeof calculateExerciseFeatures> }) {
+    /* Replaced by the set-preserving component below.
+    const latest = features.mostRecentPerformance;
+    if (!latest) return <div className="exercise-progress-summary"><span className="detail-label">Your recent performance</span><span>No working-set history yet.</span></div>;
+    return <div className="exercise-progress-summary">
+        <span className="detail-label">Your training history</span><strong>{features.progressionState}</strong><span>{features.sessionsPerformed} sessions · last trained {formatDate(latest.date)} · {features.historyConfidence} evidence</span>
+        <div className="exercise-history-evidence"><span>Last: {latest.completedWorkingSets} working sets · {latest.completion}{latest.demonstratedWorkingLoad === undefined ? "" : ` · demonstrated ${latest.demonstratedWorkingLoad}`}</span><span>Best: {features.bestWorkingWeight ?? "—"}{features.bestRepsAtBestWeight === undefined ? "" : ` × ${features.bestRepsAtBestWeight}`} · est. 1RM {features.bestEstimatedOneRepMax ?? "—"}</span><span>Recent volume: {features.recentWorkingVolume} · completion {features.averageCompletionRate === undefined ? "—" : `${Math.round(features.averageCompletionRate * 100)}%`}</span><span>Recent: {features.recentPerformances.map((item) => `${formatDate(item.date)} ${item.averageWorkingWeight ?? "—"} × ${item.averageWorkingReps ?? "—"}`).join(" · ")}</span></div>
+    </div>;
+}
+
+    */
+    return <ExerciseHistoryEvidence features={features} />;
+}
+
+function ExerciseHistoryEvidence({ features }: { features: ReturnType<typeof calculateExerciseFeatures> }) {
+    const latest = features.mostRecentPerformance;
+    if (!latest) return <div className="exercise-progress-summary"><span className="detail-label">Your training history</span><span>No working-set history yet.</span></div>;
+    return <div className="exercise-progress-summary">
+        <span className="detail-label">Your training history</span><strong>{features.progressionState}</strong><span>{features.sessionsPerformed} sessions · last trained {formatDate(latest.date)} · {features.historyConfidence} evidence</span>
+        <div className="exercise-history-evidence"><span>Last: {latest.completedWorkingSets} working sets · {latest.completion}</span><span>Best: {features.bestWorkingWeight ?? "—"}{features.bestRepsAtBestWeight === undefined ? "" : ` × ${features.bestRepsAtBestWeight}`} · est. 1RM {features.bestEstimatedOneRepMax ?? "—"}</span><span>Recent volume: {features.recentWorkingVolume} · completion {features.averageCompletionRate === undefined ? "—" : `${Math.round(features.averageCompletionRate * 100)}%`}</span>{features.recentPerformances.map((performance) => <div className="exercise-session-sets" key={performance.sessionId}><strong>{formatDate(performance.date)}{performance.plannedSets === undefined ? " · no saved prescription" : ` · planned ${performance.plannedSets} × ${performance.plannedRepRange?.min}–${performance.plannedRepRange?.max}`}</strong><span>{performance.sets.map((set) => `${set.setType}: ${set.weight} × ${set.reps}${set.rir === undefined ? set.rpe === undefined ? "" : ` @ RPE ${set.rpe}` : ` @ ${set.rir} RIR`}`).join(" · ")}</span></div>)}</div>
+    </div>;
+}
+
 export function LegacyExercisesView({ onSelect, }: {
     onSelect: (id: string) => void;
 }) {

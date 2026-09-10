@@ -112,13 +112,27 @@ export interface UserPreferences {
   bodyweightLb?: number
 }
 
-export type ExerciseProgressState = 'progressing' | 'stable' | 'stalled' | 'declining' | 'regressing' | 'insufficient history'
+export type ExerciseProgressState = 'progressing' | 'stable' | 'stalled' | 'regressing' | 'insufficient history'
 export type MuscleVolumeState = 'low recent volume' | 'moderate recent volume' | 'high recent volume' | 'insufficient history'
 export type PreferenceState = 'preferred' | 'neutral' | 'disliked' | 'unknown'
 export type HistoryConfidence = 'none' | 'limited' | 'moderate' | 'strong'
 export type WorkloadTrend = 'increasing' | 'stable' | 'decreasing' | 'insufficient history'
 
-export type PrescriptionCompletion = 'completed' | 'partial' | 'below target' | 'unplanned'
+export type PrescriptionCompletion = 'completed' | 'partial' | 'below target' | 'not started' | 'unplanned'
+export interface PerformedSet {
+  id: string
+  setType: SetType
+  weight: number
+  loadType?: LoggedSet['loadType']
+  reps: number
+  rir?: number
+  rpe?: number
+  setDurationSeconds?: number
+  restDurationSeconds?: number
+  notes?: string
+  completedAt?: string
+  estimatedOneRepMax?: number
+}
 export interface ExercisePerformance {
   exerciseId: string
   sessionId: string
@@ -127,18 +141,21 @@ export interface ExercisePerformance {
   plannedSets?: number
   plannedRepRange?: { min: number; max: number }
   plannedSetType?: SetType
+  /** Every recorded set remains available; only workingSets drive normal progression evidence. */
+  sets: PerformedSet[]
+  workingSets: PerformedSet[]
   completedSets: number
   completedWorkingSets: number
   totalReps: number
   totalWorkingReps: number
   workingVolume: number
-  averageWorkingReps?: number
-  averageWorkingWeight?: number
+  bestWorkingSet?: PerformedSet
   heaviestWorkingWeight?: number
-  estimatedOneRepMax?: number
-  averageRir?: number
-  averageRpe?: number
+  bestEstimatedOneRepMax?: number
+  averageEstimatedOneRepMax?: number
   targetRangeWorkingSets: number
+  prescriptionAchieved?: boolean
+  demonstratedWorkingLoad?: number
   completionRate?: number
   completion: PrescriptionCompletion
 }
@@ -148,21 +165,15 @@ export interface ExerciseFeatures {
   sessionsPerformed: number
   lastPerformedDate?: string
   daysSinceLastPerformed?: number
-  /** Retained for existing consumers; derived from recentPerformances. */
-  recentPerformance: { date: string; averageReps: number; averageWeight: number; estimatedOneRepMax?: number }[]
   recentPerformances: ExercisePerformance[]
   mostRecentPerformance?: ExercisePerformance
-  averageReps?: number
-  averageWeight?: number
-  estimatedOneRepMax?: number
   bestWorkingWeight?: number
   bestRepsAtBestWeight?: number
   bestEstimatedOneRepMax?: number
   recentWorkingVolume: number
   averageCompletionRate?: number
   progressionState: ExerciseProgressState
-  recentWorkingSets: { date: string; weight: number; reps: number }[]
-  recentBestWorkingLoad?: number
+  recentWorkingSets: (PerformedSet & { date: string })[]
   historyConfidence: HistoryConfidence
 }
 
@@ -183,8 +194,10 @@ export interface MuscleFeatures {
 
 export interface PlannedVsActualExercise {
   exerciseId: string
-  plannedSets: number
-  plannedRepRange: { min: number; max: number }
+  plannedSets?: number
+  plannedRepRange?: { min: number; max: number }
+  plannedSetType?: SetType
+  isAdHoc: boolean
   completedWorkingSets: number
   targetRangeWorkingSets: number
   fullyCompleted: boolean

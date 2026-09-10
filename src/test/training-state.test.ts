@@ -20,7 +20,7 @@ describe('training state', () => {
     const history = [session('a', '2026-08-25', pulldown.id, 140, 8), session('b', '2026-09-01', pulldown.id, 160, 10)]
     const state = calculateExerciseFeatures(pulldown, history, '2026-09-09')
     expect(state.progressionState).toBe('progressing')
-    expect(state.recentBestWorkingLoad).toBe(160)
+    expect(state.bestWorkingWeight).toBe(160)
     expect(state.historyConfidence).toBe('moderate')
   })
 
@@ -59,5 +59,12 @@ describe('training state', () => {
     expect(state.asOf).toBe('2026-09-09')
     expect(state.exercises.find((item) => item.exerciseId === pulldown.id)?.sessionsPerformed).toBe(1)
     expect(state.muscles.find((item) => item.muscle === 'Lats')?.rolling7DaySets).toBe(1)
+  })
+
+  it('does not include future completed sessions in an as-of snapshot', () => {
+    const history = [session('past', '2026-09-08'), session('future', '2026-09-12', pulldown.id, 200, 12)]
+    const state = calculateTrainingState([pulldown], history, '2026-09-09')
+    expect(state.exercises[0]).toMatchObject({ sessionsPerformed: 1, bestWorkingWeight: 160, lastPerformedDate: '2026-09-08' })
+    expect(state.muscles.find((item) => item.muscle === 'Lats')?.daysSinceTrained).toBe(1)
   })
 })

@@ -70,7 +70,7 @@ function historicalPerformanceEvidence(features: ReturnType<typeof calculateExer
   const completion = latest.plannedSets === undefined
     ? 'This session had no saved prescription snapshot.'
     : `Last prescription was ${latest.completion}: ${latest.completedWorkingSets}/${latest.plannedSets} working sets.`
-  const effort = latest.averageRir === undefined ? latest.averageRpe === undefined ? '' : ` Average RPE ${round(latest.averageRpe)}.` : ` Average RIR ${round(latest.averageRir)}.`
+  const effort = latest.bestWorkingSet?.rir === undefined ? latest.bestWorkingSet?.rpe === undefined ? '' : ` Best working set recorded at RPE ${round(latest.bestWorkingSet.rpe)}.` : ` Best working set recorded at ${round(latest.bestWorkingSet.rir)} RIR.`
   return `${completion}${effort}`
 }
 

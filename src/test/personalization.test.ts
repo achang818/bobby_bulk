@@ -19,7 +19,7 @@ describe('feature calculations', () => {
     const features = calculateExerciseFeatures(bench, [], '2026-09-09')
     expect(features.sessionsPerformed).toBe(0)
     expect(features.daysSinceLastPerformed).toBeUndefined()
-    expect(features.estimatedOneRepMax).toBeUndefined()
+    expect(features.bestEstimatedOneRepMax).toBeUndefined()
     expect(calculateMuscleFeatures('Upper chest', exercises, [], '2026-09-09').volumeState).toBe('insufficient history')
   })
 
