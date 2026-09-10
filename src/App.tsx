@@ -9,7 +9,8 @@ import { classifyFatigue } from "./domain/states";
 import { calculateExerciseFeatures, comparePlannedVsActual } from "./domain/features";
 import { evaluateWorkout } from "./domain/workout-evaluator";
 import { evaluateSplit } from "./domain/split-evaluator";
- import { loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
+import { loadLocalFileSnapshot, restoreBrowserData, saveLocalFileSnapshot } from "./domain/local-file-sync";
+ import { clearActiveWorkoutSession, loadActiveWorkoutSession, loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, persistWorkouts, saveActiveWorkoutSession, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
 import { completeWorkoutSession, createPlannedExercise, createWorkoutSession, planExerciseIds, resolveWorkoutForToday } from "./domain/workout-session";
 import { convertWeight, displayWeight, effectiveLoad } from "./domain/units";
@@ -32,18 +33,68 @@ function App() {
     });
     const [selectedExerciseId, setSelectedExerciseId] = useState(exercises[0].id);
     const [exerciseSearch, setExerciseSearch] = useState("");
-    const [activeSession, setActiveSession] = useState<WorkoutSession | null>(null);
+    const [activeSession, setActiveSession] = useState<WorkoutSession | null>(() => loadActiveWorkoutSession());
     const [setInputOverrides, setSetInputOverrides] = useState<Record<string, SetInput>>({});
-    const [showLogger, setShowLogger] = useState(false);
+    const [showLogger, setShowLogger] = useState(() => Boolean(loadActiveWorkoutSession()));
     const [recommendationDecisions, setRecommendationDecisions] = useState<RecommendationDecision[]>(() => loadRecommendationDecisions());
     const [activePlan, setActivePlan] = useState<WorkoutTemplate>(() => loadPlans()[0] ?? emptyPlan);
     const [plans, setPlans] = useState<WorkoutTemplate[]>(() => loadPlans());
     const [preferences, setPreferences] = useState<UserPreferences>(() => loadPreferences());
-    const [gyms] = useState<Gym[]>(() => {
+    const [gyms, setGyms] = useState<Gym[]>(() => {
         const saved = loadGyms();
         return saved.length > 0 ? saved : [defaultGym];
     });
     const [todaysContext, setTodaysContext] = useState<TodaysContext>(() => loadTodaysContext({ gymId: preferences.defaultGymId ?? defaultGym.id, unavailableEquipment: [] }));
+    const [localFileReady, setLocalFileReady] = useState(false);
+    useEffect(() => {
+        let cancelled = false;
+        void loadLocalFileSnapshot().then((snapshot) => {
+            if (cancelled || !restoreBrowserData(snapshot))
+                return;
+            const restoredPreferences = loadPreferences();
+            const restoredPlans = loadPlans();
+            const restoredGyms = loadGyms();
+            const restoredActiveSession = loadActiveWorkoutSession();
+            setWorkouts(loadWorkouts());
+            setPlans(restoredPlans);
+            setActivePlan(restoredPlans[0] ?? emptyPlan);
+            setPreferences(restoredPreferences);
+            setGyms(restoredGyms.length ? restoredGyms : [defaultGym]);
+            setTodaysContext(loadTodaysContext({ gymId: restoredPreferences.defaultGymId ?? defaultGym.id, unavailableEquipment: [] }));
+            setRecommendationDecisions(loadRecommendationDecisions());
+            setActiveSession(restoredActiveSession);
+            setShowLogger(Boolean(restoredActiveSession));
+        }).catch(() => {
+            // The JSON endpoint exists only during local development; browser storage remains usable without it.
+        }).finally(() => {
+            if (!cancelled)
+                setLocalFileReady(true);
+        });
+        return () => { cancelled = true; };
+    }, []);
+    useEffect(() => {
+        persistWorkouts(workouts);
+    }, [workouts]);
+    useEffect(() => {
+        if (!localFileReady)
+            return;
+        void saveLocalFileSnapshot().catch(() => {
+            // Keep the app offline-first when the local development server is unavailable.
+        });
+    }, [activeSession, gyms, localFileReady, plans, preferences, recommendationDecisions, todaysContext, workouts]);
+    useEffect(() => {
+        if (!localFileReady)
+            return;
+        const flushLocalFile = () => { void saveLocalFileSnapshot(); };
+        window.addEventListener("beforeunload", flushLocalFile);
+        return () => window.removeEventListener("beforeunload", flushLocalFile);
+    }, [localFileReady]);
+    useEffect(() => {
+        if (activeSession)
+            saveActiveWorkoutSession(activeSession);
+        else
+            clearActiveWorkoutSession();
+    }, [activeSession]);
     const currentGym = gyms.find((gym) => gym.id === todaysContext.gymId) ?? gyms[0] ?? defaultGym;
     const workoutsInCurrentUnit = useMemo(() => workouts.map((workout) => ({ ...workout, unit: preferences.weightUnit, sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(effectiveLoad(set, preferences.bodyweightLb), workout.unit, preferences.weightUnit), })), })), [preferences.bodyweightLb, preferences.weightUnit, workouts]);
     const activePlanExerciseIds = planExerciseIds(activePlan);
@@ -84,7 +135,13 @@ function App() {
         setTodaysContext(saveTodaysContext(next));
     }
     function updateSessionSets(update: (current: LoggedSet[]) => LoggedSet[]) {
-        setActiveSession((current) => current ? { ...current, sets: update(current.sets) } : current);
+        setActiveSession((current) => {
+            if (!current)
+                return current;
+            const next = { ...current, sets: update(current.sets) };
+            saveActiveWorkoutSession(next);
+            return next;
+        });
     }
     function addSet() {
         const parsedWeight = Number(setInput.weight);
@@ -114,6 +171,11 @@ function App() {
         setView("history");
     }
     function startPlan(plan: WorkoutTemplate) {
+        if (activeSession) {
+            setSelectedExerciseId(activeSession.plannedExercises?.find((planned) => !activeSession.sets.filter((set) => set.exerciseId === planned.exerciseId).length)?.exerciseId ?? activeSession.plannedExercises?.[0]?.exerciseId ?? exercises[0].id);
+            setShowLogger(true);
+            return;
+        }
         const planGoalCriticalIds = planExerciseIds(plan).filter((id) => {
             const exercise = exercises.find((item) => item.id === id);
             return exercise?.primaryMuscles.some((muscle) => preferences.priorities.some((priority) => priority.toLowerCase() === muscle.toLowerCase())) ?? false;
@@ -128,6 +190,11 @@ function App() {
         setShowLogger(true);
     }
     function startRecommendedWorkout() {
+        if (activeSession) {
+            setSelectedExerciseId(activeSession.plannedExercises?.find((planned) => !activeSession.sets.filter((set) => set.exerciseId === planned.exerciseId).length)?.exerciseId ?? activeSession.plannedExercises?.[0]?.exerciseId ?? exercises[0].id);
+            setShowLogger(true);
+            return;
+        }
         if (workoutExerciseIds.length === 0) {
             setView("plans");
             return;
@@ -383,6 +450,33 @@ function ExercisesView() {
     const [filter, setFilter] = useState("All");
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const workouts = useMemo(() => loadWorkouts(), []);
+    useEffect(() => {
+        if (!expandedId)
+            return;
+        const exercise = exercises.find((item) => item.id === expandedId);
+        const target = document.querySelector(".exercise-details .exercise-progress-summary");
+        if (!exercise || !target)
+            return;
+        const history = calculateExerciseFeatures(exercise, workouts);
+        if (!history.mostRecentPerformance)
+            return;
+        const panel = document.createElement("div");
+        panel.className = "exercise-history-evidence";
+        const title = document.createElement("span");
+        title.className = "detail-label";
+        title.textContent = "History evidence";
+        const last = document.createElement("span");
+        const performance = history.mostRecentPerformance;
+        last.textContent = `Last: ${formatDate(performance.date)} · ${performance.completedWorkingSets} working sets · ${performance.completion}`;
+        const best = document.createElement("span");
+        best.textContent = `Best working load: ${history.bestWorkingWeight ?? "—"}${history.bestRepsAtBestWeight === undefined ? "" : ` × ${history.bestRepsAtBestWeight}`} · Best est. 1RM: ${history.bestEstimatedOneRepMax ?? "—"}`;
+        const recent = document.createElement("span");
+        const recentPerformances = history.recentPerformances.map((item) => `${formatDate(item.date)} ${item.averageWorkingWeight ?? "—"} × ${item.averageWorkingReps ?? "—"}`).join(" · ");
+        recent.textContent = `Recent: ${recentPerformances} · Volume: ${history.recentWorkingVolume} · Average completion: ${history.averageCompletionRate === undefined ? "—" : `${Math.round(history.averageCompletionRate * 100)}%`}`;
+        panel.append(title, last, best, recent);
+        target.append(panel);
+        return () => panel.remove();
+    }, [expandedId, workouts]);
     const categories = ["All", ...new Set(exercises.map((exercise) => exercise.category)),];
     const filteredExercises = exercises.filter((exercise) => {
         const haystack = `${exercise.name} ${exercise.category} ${exercise.equipment} ${exercise.primaryMuscles.join(" ")}`.toLowerCase();

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import { deleteProgram, deleteSplit, loadPrograms, loadSplits, mergeWorkoutSessions, saveProgram, saveSplit } from '../domain/storage'
-import type { Program, Split, Workout } from '../domain/models'
+import { clearActiveWorkoutSession, deleteProgram, deleteSplit, loadActiveWorkoutSession, loadPrograms, loadSplits, loadWorkouts, mergeWorkoutSessions, persistWorkouts, saveActiveWorkoutSession, saveProgram, saveSplit, saveWorkout } from '../domain/storage'
+import type { Program, Split, Workout, WorkoutSession } from '../domain/models'
 
 const workout = (id: string, date: string, title: string, exerciseId: string): Workout => ({
   id, date, title, unit: 'lb', status: 'completed',
@@ -56,5 +56,31 @@ describe('program and split storage', () => {
     localStorage.setItem('bobby-bulk-programs', JSON.stringify([{ id: 'bad', name: 'Bad' }]))
     expect(loadSplits()).toEqual([])
     expect(loadPrograms()).toEqual([])
+  })
+})
+
+describe('workout persistence', () => {
+  it('reloads completed workouts and never duplicates a saved session', () => {
+    const completed = workout('completed', '2026-09-10', 'Pull', 'lat-pulldown')
+    saveWorkout(completed, [])
+    saveWorkout(completed)
+    expect(loadWorkouts()).toHaveLength(1)
+    expect(loadWorkouts()[0]).toMatchObject({ id: 'completed', status: 'completed', sets: completed.sets })
+  })
+
+  it('recovers completed history from its backup when the primary value is malformed', () => {
+    const completed = workout('backup', '2026-09-10', 'Pull', 'lat-pulldown')
+    persistWorkouts([completed])
+    localStorage.setItem('bobby-bulk-workouts', '{not valid json')
+    expect(loadWorkouts()).toMatchObject([{ id: 'backup', sets: completed.sets }])
+    expect(localStorage.getItem('bobby-bulk-workouts')).toContain('backup')
+  })
+
+  it('restores in-progress logger sets after a restart and clears them only when finished', () => {
+    const active: WorkoutSession = { id: 'active', workoutId: 'pull', date: '2026-09-10', title: 'Pull', status: 'in-progress', plannedExercises: [{ exerciseId: 'lat-pulldown', order: 0, sets: 3, repRange: { min: 8, max: 12 }, setType: 'working' }], sets: [{ id: 'set', exerciseId: 'lat-pulldown', setType: 'working', weight: 160, reps: 8 }] }
+    saveActiveWorkoutSession(active)
+    expect(loadActiveWorkoutSession()).toMatchObject(active)
+    clearActiveWorkoutSession()
+    expect(loadActiveWorkoutSession()).toBeNull()
   })
 })

@@ -2,15 +2,38 @@ import type { ExerciseProgressState, MuscleVolumeState, PreferenceState, Recomme
 
 export type RecentWorkloadLevel = 'Low' | 'Moderate' | 'High'
 
-export function classifyExerciseProgression(performance: { averageReps: number }[]): ExerciseProgressState {
+/**
+ * A deliberately conservative comparison of recent, comparable working-set
+ * sessions. Two sessions can demonstrate improvement, but a decline needs two
+ * consecutive weaker sessions so one off day is not over-interpreted.
+ */
+export function classifyExerciseProgression(performance: { averageReps: number; averageWeight?: number; estimatedOneRepMax?: number }[]): ExerciseProgressState {
   if (performance.length < 2) return 'insufficient history'
   const recent = performance.slice(-3)
-  const first = recent[0].averageReps
-  const last = recent.at(-1)?.averageReps ?? first
-  if (last - first >= 0.75) return 'progressing'
-  if (first - last >= 1.5) return 'regressing'
-  if (recent.length >= 3 && recent.every((item) => Math.abs(item.averageReps - first) < 0.75)) return 'stalled'
+  const first = recent[0]
+  const last = recent.at(-1) ?? first
+  if (meaningfullyBetter(last, first)) return 'progressing'
+  if (recent.length >= 3 && meaningfullyWorse(recent[1], first) && meaningfullyWorse(last, first)) return 'declining'
+  if (recent.length >= 3 && recent.every((item) => !meaningfullyBetter(item, first) && !meaningfullyWorse(item, first))) return 'stalled'
   return 'stable'
+}
+
+function metric(performance: { averageReps: number; averageWeight?: number; estimatedOneRepMax?: number }) {
+  return performance.estimatedOneRepMax ?? (performance.averageWeight ? performance.averageWeight * (1 + performance.averageReps / 30) : undefined)
+}
+function meaningfullyBetter(current: { averageReps: number; averageWeight?: number; estimatedOneRepMax?: number }, baseline: { averageReps: number; averageWeight?: number; estimatedOneRepMax?: number }) {
+  const currentMetric = metric(current)
+  const baselineMetric = metric(baseline)
+  if (currentMetric !== undefined && baselineMetric !== undefined && currentMetric >= baselineMetric * 1.03) return true
+  const comparableLoad = current.averageWeight !== undefined && baseline.averageWeight !== undefined && Math.abs(current.averageWeight - baseline.averageWeight) <= Math.max(1, baseline.averageWeight * .025)
+  return comparableLoad && current.averageReps - baseline.averageReps >= .75
+}
+function meaningfullyWorse(current: { averageReps: number; averageWeight?: number; estimatedOneRepMax?: number }, baseline: { averageReps: number; averageWeight?: number; estimatedOneRepMax?: number }) {
+  const currentMetric = metric(current)
+  const baselineMetric = metric(baseline)
+  if (currentMetric !== undefined && baselineMetric !== undefined && currentMetric <= baselineMetric * .95) return true
+  const comparableLoad = current.averageWeight !== undefined && baseline.averageWeight !== undefined && Math.abs(current.averageWeight - baseline.averageWeight) <= Math.max(1, baseline.averageWeight * .025)
+  return comparableLoad && baseline.averageReps - current.averageReps >= 1.5
 }
 
 export function classifyMuscleVolume(recentSets: number): MuscleVolumeState {

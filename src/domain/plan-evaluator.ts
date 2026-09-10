@@ -22,7 +22,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     const preferenceState = classifyPreference(exercise.id, preferences, decisions)
     if (features.sessionsPerformed > 0 && progression.action !== 'start-here') {
       const trace = buildTrace('double-progression')
-      recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: [progression.reasons[0], progression.reasons[1]], trace })
+      recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: [progression.reasons[0], historicalPerformanceEvidence(features), progression.reasons[1]], trace })
     }
     if (features.sessionsPerformed >= 2 && goalAligned && preferenceState !== 'disliked' && ['progressing', 'stable'].includes(features.progressionState)) {
       const trace = buildTrace('keep-stable-exercise')
@@ -63,6 +63,18 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
   }
   return recommendations.sort((a, b) => b.score - a.score)
 }
+
+function historicalPerformanceEvidence(features: ReturnType<typeof calculateExerciseFeatures>): string {
+  const latest = features.mostRecentPerformance
+  if (!latest) return 'No completed working-set performance is available yet.'
+  const completion = latest.plannedSets === undefined
+    ? 'This session had no saved prescription snapshot.'
+    : `Last prescription was ${latest.completion}: ${latest.completedWorkingSets}/${latest.plannedSets} working sets.`
+  const effort = latest.averageRir === undefined ? latest.averageRpe === undefined ? '' : ` Average RPE ${round(latest.averageRpe)}.` : ` Average RIR ${round(latest.averageRir)}.`
+  return `${completion}${effort}`
+}
+
+function round(value: number) { return Math.round(value * 10) / 10 }
 
 function specificityScore(candidate: Exercise, stalledExercise: Exercise): number {
   if (stalledExercise.type !== 'isolation' || candidate.type !== 'isolation') return 0

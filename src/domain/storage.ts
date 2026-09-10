@@ -1,9 +1,10 @@
 import { exercises } from './exercises'
 import { normalizeWorkoutSession, normalizeWorkoutTemplate } from './workout-session'
-import type { Gym, PlanRecommendation, Program, RecommendationDecision, RecommendationDecisionType, Split, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
+import type { Gym, PlanRecommendation, Program, RecommendationDecision, RecommendationDecisionType, Split, TodaysContext, UserPreferences, Workout, WorkoutSession, WorkoutTemplate } from './models'
 import { defaultPreferences } from './preferences'
 
 const STORAGE_KEY = 'bobby-bulk-workouts'
+const WORKOUT_BACKUP_KEY = 'bobby-bulk-workouts-backup'
 const TEMPLATE_KEY = 'bobby-bulk-templates'
 const PLAN_KEY = 'bobby-bulk-plans'
 const PREFERENCES_KEY = 'bobby-bulk-preferences'
@@ -12,12 +13,27 @@ const GYMS_KEY = 'bobby-bulk-gyms'
 const TODAYS_CONTEXT_KEY = 'bobby-bulk-todays-context'
 const SPLITS_KEY = 'bobby-bulk-splits'
 const PROGRAMS_KEY = 'bobby-bulk-programs'
+const ACTIVE_SESSION_KEY = 'bobby-bulk-active-session'
+
+/** Keys mirrored to the local development JSON store. */
+export const PERSISTED_STORAGE_KEYS = [
+  STORAGE_KEY, WORKOUT_BACKUP_KEY, ACTIVE_SESSION_KEY, TEMPLATE_KEY, PLAN_KEY,
+  PREFERENCES_KEY, DECISIONS_KEY, GYMS_KEY, TODAYS_CONTEXT_KEY, SPLITS_KEY, PROGRAMS_KEY,
+] as const
 
 export function loadWorkouts(): Workout[] {
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (!stored) return []
-  const workouts = (JSON.parse(stored) as unknown[]).map(normalizeWorkoutSession)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
+  const primary = readWorkouts(localStorage.getItem(STORAGE_KEY))
+  const backup = primary ?? readWorkouts(localStorage.getItem(WORKOUT_BACKUP_KEY))
+  if (!backup) return []
+  persistWorkouts(backup)
+  return backup
+}
+
+/** Writes both the current history and a recovery copy for client-side storage failures. */
+export function persistWorkouts(workouts: Workout[]): Workout[] {
+  const serialized = JSON.stringify(workouts)
+  localStorage.setItem(STORAGE_KEY, serialized)
+  localStorage.setItem(WORKOUT_BACKUP_KEY, serialized)
   return workouts
 }
 
@@ -42,21 +58,40 @@ export function mergeWorkoutSessions(workouts: Workout[]): Workout[] {
 }
 
 export function saveWorkout(workout: Workout, existingWorkouts = loadWorkouts()): Workout[] {
-  const workouts = [workout, ...existingWorkouts]
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
-  return workouts
+  const workouts = [workout, ...existingWorkouts.filter((item) => item.id !== workout.id)]
+  return persistWorkouts(workouts)
+}
+
+/** Active logger work is saved separately so a refresh never discards logged sets. */
+export function loadActiveWorkoutSession(): WorkoutSession | null {
+  const stored = localStorage.getItem(ACTIVE_SESSION_KEY)
+  if (!stored) return null
+  try {
+    const session = normalizeWorkoutSession(JSON.parse(stored) as unknown)
+    return session.status === 'completed' ? null : session
+  } catch {
+    localStorage.removeItem(ACTIVE_SESSION_KEY)
+    return null
+  }
+}
+
+export function saveActiveWorkoutSession(session: WorkoutSession): WorkoutSession {
+  localStorage.setItem(ACTIVE_SESSION_KEY, JSON.stringify(session))
+  return session
+}
+
+export function clearActiveWorkoutSession() {
+  localStorage.removeItem(ACTIVE_SESSION_KEY)
 }
 
 export function updateWorkout(workout: Workout, existingWorkouts = loadWorkouts()): Workout[] {
   const workouts = existingWorkouts.map((item) => item.id === workout.id ? workout : item)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
-  return workouts
+  return persistWorkouts(workouts)
 }
 
 export function deleteWorkout(workoutId: string, existingWorkouts = loadWorkouts()): Workout[] {
   const workouts = existingWorkouts.filter((workout) => workout.id !== workoutId)
-  localStorage.setItem(STORAGE_KEY, JSON.stringify(workouts))
-  return workouts
+  return persistWorkouts(workouts)
 }
 
 export function loadSavedTemplates(): WorkoutTemplate[] {
@@ -190,4 +225,14 @@ function isProgram(value: unknown): value is Program {
   if (!value || typeof value !== 'object') return false
   const candidate = value as Partial<Program>
   return typeof candidate.id === 'string' && typeof candidate.name === 'string' && typeof candidate.splitId === 'string'
+}
+
+function readWorkouts(serialized: string | null): Workout[] | null {
+  if (!serialized) return null
+  try {
+    const parsed = JSON.parse(serialized) as unknown
+    return Array.isArray(parsed) ? parsed.map(normalizeWorkoutSession) : null
+  } catch {
+    return null
+  }
 }
