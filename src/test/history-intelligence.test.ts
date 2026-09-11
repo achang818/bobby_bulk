@@ -3,6 +3,7 @@ import { exercises } from '../domain/exercises'
 import { calculateExerciseFeatures, calculateExercisePerformance, comparePlannedVsActual, exercisePerformanceHistory } from '../domain/features'
 import { evaluatePlan } from '../domain/plan-evaluator'
 import { defaultPreferences } from '../domain/preferences'
+import { compareExercisePerformance } from '../domain/states'
 import type { Workout, WorkoutPlan } from '../domain/models'
 
 const pulldown = exercises.find((exercise) => exercise.id === 'lat-pulldown')!
@@ -96,6 +97,137 @@ describe('exercise history features', () => {
     expect(calculateExerciseFeatures(pulldown, oneBad, '2026-09-09').progressionState).not.toBe('regressing')
     expect(calculateExerciseFeatures(pulldown, declining, '2026-09-09').progressionState).toBe('regressing')
     expect(calculateExerciseFeatures(pulldown, [improving[0]], '2026-09-09').progressionState).toBe('insufficient history')
+  })
+})
+
+describe('set-level performance comparison', () => {
+  function performance(id: string, date: string, sets: Workout['sets'], plannedExercises = plan.plannedExercises) {
+    return calculateExercisePerformance({ id, date, title: 'Pull', status: 'completed', plannedExercises, sets }, pulldown.id)!
+  }
+
+  it('uses more reps at the same load and the same reps at a higher load as direct progression evidence', () => {
+    const baseline = performance('a', '2026-09-01', [working('a', 100, 8)])
+    expect(compareExercisePerformance(baseline, performance('b', '2026-09-03', [working('b', 100, 10)])).direction).toBe('improved')
+    expect(compareExercisePerformance(baseline, performance('c', '2026-09-05', [working('c', 105, 8)])).direction).toBe('improved')
+  })
+
+  it('uses all ordinary working sets instead of a single best set', () => {
+    const previous = performance('a', '2026-09-01', [working('a1', 100, 8), working('a2', 100, 8), working('a3', 95, 9)])
+    const current = performance('b', '2026-09-03', [working('b1', 100, 9), working('b2', 100, 9), working('b3', 100, 8)])
+    expect(compareExercisePerformance(previous, current)).toMatchObject({ direction: 'improved', comparableSets: 2, improvedSets: 2 })
+  })
+
+  it('matches real sets by comparable evidence instead of their sorted positions', () => {
+    const previous = performance('a', '2026-09-01', [working('a1', 100, 8), working('a2', 95, 10), working('a3', 95, 9)])
+    const current = performance('b', '2026-09-03', [working('b1', 100, 9), working('b2', 100, 8), working('b3', 90, 12)])
+    const comparison = compareExercisePerformance(previous, current)
+    expect(comparison.matchedSets).toEqual([
+      { previousSetId: 'a1', currentSetId: 'b1', direction: 'improved' },
+      { previousSetId: 'a3', currentSetId: 'b2', direction: 'inconclusive' },
+      { previousSetId: 'a2', currentSetId: 'b3', direction: 'inconclusive' },
+    ])
+    expect(comparison.direction).toBe('improved')
+  })
+
+  it('reserves an exact-load counterpart before using overlapping comparable-load ranges', () => {
+    const previous = performance('a', '2026-09-01', [working('a100', 100, 8), working('a140', 140, 8)], [])
+    const current = performance('b', '2026-09-03', [working('b115', 115, 8), working('b140', 140, 8)], [])
+    expect(compareExercisePerformance(previous, current).matchedSets).toEqual([
+      { previousSetId: 'a140', currentSetId: 'b140', direction: 'unchanged' },
+      { previousSetId: 'a100', currentSetId: 'b115', direction: 'improved' },
+    ])
+  })
+
+  it('matches three loads and duplicate loads without reusing any historical set', () => {
+    const previous = performance('a', '2026-09-01', [working('a100', 100, 8), working('a110-low', 110, 8), working('a110-high', 110, 9)], [])
+    const current = performance('b', '2026-09-03', [working('b102', 102.5, 8), working('b110', 110, 9), working('b118', 118, 8)], [])
+    const matched = compareExercisePerformance(previous, current).matchedSets ?? []
+    expect(matched.map((item) => item.previousSetId)).toEqual(['a110-high', 'a100', 'a110-low'])
+    expect(new Set(matched.map((item) => item.previousSetId)).size).toBe(3)
+  })
+
+  it('recognizes more target-range sets after an unchanged matched set as progression', () => {
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8)])
+    const current = performance('b', '2026-09-03', [working('b1', 100, 8), working('b2', 100, 8), working('b3', 100, 8)])
+    expect(compareExercisePerformance(previous, current).direction).toBe('improved')
+  })
+
+  it('recognizes a 1-to-3 set prescription increase when the user completes the added target-range work', () => {
+    const oneSetPlan = [{ exerciseId: pulldown.id, order: 0, sets: 1, repRange: { min: 8, max: 12 }, setType: 'working' as const }]
+    const threeSetPlan = [{ exerciseId: pulldown.id, order: 0, sets: 3, repRange: { min: 8, max: 12 }, setType: 'working' as const }]
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8)], oneSetPlan)
+    const current = performance('b', '2026-09-03', [working('b1', 100, 8), working('b2', 100, 8), working('b3', 100, 8)], threeSetPlan)
+    expect(compareExercisePerformance(previous, current)).toMatchObject({ direction: 'improved', unchangedSets: 1 })
+  })
+
+  it('does not let extra prescribed sets override a clearly weaker matched set', () => {
+    const widerRangePlan = [{ exerciseId: pulldown.id, order: 0, sets: 3, repRange: { min: 5, max: 10 }, setType: 'working' as const }]
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8)], widerRangePlan)
+    const current = performance('b', '2026-09-03', [working('b1', 100, 6), working('b2', 100, 6), working('b3', 100, 6)], widerRangePlan)
+    expect(compareExercisePerformance(previous, current)).toMatchObject({ direction: 'worse', worsenedSets: 1 })
+  })
+
+  it('leaves sets with no reasonable historical counterpart unmatched', () => {
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8)], [])
+    const current = performance('b', '2026-09-03', [working('b', 130, 8)], [])
+    expect(compareExercisePerformance(previous, current)).toMatchObject({ direction: 'inconclusive', comparableSets: 0 })
+  })
+
+  it('keeps mixed direct set evidence inconclusive', () => {
+    const previous = performance('a', '2026-09-01', [working('a1', 100, 10), working('a2', 100, 6)])
+    const current = performance('b', '2026-09-03', [working('b1', 100, 9), working('b2', 100, 8)])
+    expect(compareExercisePerformance(previous, current).direction).toBe('inconclusive')
+  })
+
+  it('recognizes additional target-range work when the planned set count increases', () => {
+    const fourSetPlan = [{ exerciseId: pulldown.id, order: 0, sets: 4, repRange: { min: 8, max: 12 }, setType: 'working' as const }]
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8)])
+    const current = performance('b', '2026-09-03', [working('b1', 100, 8), working('b2', 100, 8), working('b3', 100, 8), working('b4', 100, 8)], fourSetPlan)
+    expect(compareExercisePerformance(previous, current).direction).toBe('improved')
+  })
+
+  it('does not call a much heavier, low-rep effort automatic progression', () => {
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8, { rir: 2 })], [])
+    const current = performance('b', '2026-09-03', [working('b', 110, 3, { rir: 0 })], [])
+    expect(compareExercisePerformance(previous, current).direction).toBe('inconclusive')
+  })
+
+  it('excludes warm-up, drop, and failure sets from the normal comparison', () => {
+    const previous = performance('a', '2026-09-01', [
+      { id: 'warm-a', exerciseId: pulldown.id, setType: 'warm-up', weight: 60, reps: 10 },
+      working('a', 100, 8),
+      { id: 'drop-a', exerciseId: pulldown.id, setType: 'drop', weight: 70, reps: 20 },
+      { id: 'failure-a', exerciseId: pulldown.id, setType: 'failure', weight: 110, reps: 2 },
+    ])
+    const current = performance('b', '2026-09-03', [
+      { id: 'warm-b', exerciseId: pulldown.id, setType: 'warm-up', weight: 200, reps: 2 },
+      working('b', 100, 8),
+      { id: 'drop-b', exerciseId: pulldown.id, setType: 'drop', weight: 30, reps: 40 },
+      { id: 'failure-b', exerciseId: pulldown.id, setType: 'failure', weight: 200, reps: 1 },
+    ])
+    expect(compareExercisePerformance(previous, current)).toMatchObject({ direction: 'unchanged', comparableSets: 1 })
+  })
+
+  it('gives RIR precedence over RPE when effort makes a heavier set ambiguous', () => {
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8, { rir: 2, rpe: 10 })])
+    const current = performance('b', '2026-09-03', [working('b', 105, 8, { rir: 0, rpe: 6 })])
+    expect(compareExercisePerformance(previous, current).direction).toBe('inconclusive')
+  })
+
+  it('handles RPE-only and mixed effort evidence without inventing an RIR value', () => {
+    const rpeOnlyPrevious = performance('a', '2026-09-01', [working('a', 100, 8, { rpe: 7 })], [])
+    const rpeOnlyCurrent = performance('b', '2026-09-03', [working('b', 105, 8, { rpe: 7 })], [])
+    const mixedCurrent = performance('c', '2026-09-05', [working('c', 105, 8, { rpe: 9 })], [])
+    const rirPrevious = performance('d', '2026-09-07', [working('d', 100, 8, { rir: 2 })], [])
+    expect(compareExercisePerformance(rpeOnlyPrevious, rpeOnlyCurrent).direction).toBe('improved')
+    expect(compareExercisePerformance(rirPrevious, mixedCurrent).direction).toBe('inconclusive')
+  })
+
+  it('does not compare different rep prescriptions as if they were the same block', () => {
+    const strengthPlan = [{ exerciseId: pulldown.id, order: 0, sets: 3, repRange: { min: 5, max: 8 }, setType: 'working' as const }]
+    const previous = performance('a', '2026-09-01', [working('a', 100, 8)])
+    const current = performance('b', '2026-09-03', [working('b', 110, 6)], strengthPlan)
+    expect(compareExercisePerformance(previous, current).direction).toBe('inconclusive')
   })
 })
 
