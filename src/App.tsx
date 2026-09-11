@@ -335,6 +335,54 @@ function GoalsForm({ preferences, onSave, }: {
     function toggle<T>(items: T[], item: T) {
         return items.includes(item) ? items.filter((value) => value !== item) : [...items, item];
     }
+    useEffect(() => {
+        const options = document.querySelector(".priority-options");
+        if (!options)
+            return;
+        const ranking = document.createElement("section");
+        ranking.className = "priority-ranking";
+        const heading = document.createElement("p");
+        heading.className = "priority-ranking-heading";
+        heading.textContent = "Priority order";
+        ranking.append(heading);
+        if (!priorities.length) {
+            const empty = document.createElement("p");
+            empty.className = "priority-ranking-empty";
+            empty.textContent = "Select muscles above; the order you set here is your ranking.";
+            ranking.append(empty);
+        }
+        priorities.forEach((priority, index) => {
+            const row = document.createElement("div");
+            row.className = "priority-ranking-row";
+            const rank = document.createElement("span");
+            rank.textContent = String(index + 1).padStart(2, "0");
+            const name = document.createElement("strong");
+            name.textContent = priority;
+            const controls = document.createElement("div");
+            const move = (label: string, offset: number) => {
+                const button = document.createElement("button");
+                button.type = "button";
+                button.textContent = label;
+                button.disabled = index + offset < 0 || index + offset >= priorities.length;
+                button.setAttribute("aria-label", `Move ${priority} ${offset < 0 ? "up" : "down"}`);
+                button.addEventListener("click", () => setPriorities((current) => {
+                    const destination = index + offset;
+                    if (destination < 0 || destination >= current.length)
+                        return current;
+                    const next = [...current];
+                    [next[index], next[destination]] = [next[destination], next[index]];
+                    return next;
+                }));
+                controls.append(button);
+            };
+            move("↑", -1);
+            move("↓", 1);
+            row.append(rank, name, controls);
+            ranking.append(row);
+        });
+        options.insertAdjacentElement("afterend", ranking);
+        return () => ranking.remove();
+    }, [priorities]);
     return (<>      <section className="page-intro compact">        <div>          <p className="eyebrow">Personal settings</p>          <h1>What are you training for?</h1>          <p className="lede">            Keep it simple. Bobby uses these priorities to evaluate your            existing plans.          </p>        </div>      </section>      <section className="goals-layout">        <div className="goals-panel">          <p className="eyebrow">Primary goals</p>          <div className="goal-options">            {goalOptions.map((goal) => (<button key={goal} className={goals.includes(goal) ? "goal-option active" : "goal-option"} onClick={() => setGoals(toggle(goals, goal))}>                {goals.includes(goal) ? "✓" : "+"} {goal}              </button>))}          </div>          <p className="eyebrow priority-label">            Anything you particularly want to improve?          </p>          <div className="priority-options">            {priorityOptions.map((priority) => (<button key={priority} className={priorities.includes(priority) ? "filter-chip active" : "filter-chip"} onClick={() => setPriorities(toggle(priorities, priority))}>                {priority}              </button>))}          </div>          <button className="primary-button save-goals" onClick={() => onSave({ ...preferences, goals, priorities })}>            Save preferences          </button>        </div>        <aside className="mini-panel goals-note">          <span className="why-icon">i</span>          <h2>How this helps</h2>          <p>            Your choices become structured evidence for plan evaluation. They            can suggest an addition or support keeping an exercise, but Bobby            will not change your plan automatically.          </p>        </aside>      </section>    </>);
 }
 function GoalsView({ preferences, onSave, }: {

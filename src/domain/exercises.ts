@@ -956,6 +956,21 @@ export const exercises: Exercise[] = [
   },
 
   {
+    id: 'crunch-machine',
+    name: 'Crunch Machine',
+    category: 'Isolation',
+    equipment: 'Machine',
+    primaryMuscles: ['Abs'],
+    secondaryMuscles: [],
+    goals: ['Build muscle', 'General fitness'],
+    type: 'isolation',
+    repRange: { min: 10, max: 15 },
+    defaultSets: 3,
+    movementPattern: 'isolation',
+    primaryAction: 'trunk-flexion',
+  },
+
+  {
     id: 'hanging-leg-raise',
     name: 'Hanging Leg Raise',
     category: 'Isolation',

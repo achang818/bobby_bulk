@@ -2,11 +2,14 @@ import { describe, expect, it } from 'vitest'
 import { calculateExerciseFeatures, calculateMuscleFeatures } from '../domain/features'
 import { exercises } from '../domain/exercises'
 import { evaluatePlan } from '../domain/plan-evaluator'
+import { PLAN_FREQUENCY_OPPORTUNITIES } from '../domain/plan-evaluator'
 import { defaultPreferences } from '../domain/preferences'
 import type { RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from '../domain/models'
 
 const bench = exercises.find((exercise) => exercise.id === 'incline-db-bench')!
 const lateralRaise = exercises.find((exercise) => exercise.id === 'cable-lateral-raise')!
+const cableRow = exercises.find((exercise) => exercise.id === 'cable-row')!
+const cableCrunch = exercises.find((exercise) => exercise.id === 'cable-crunch')!
 const plan: WorkoutPlan = { id: 'upper', name: 'Upper', description: 'test', focus: 'Upper body', exerciseIds: [bench.id] }
 const prefs: UserPreferences = { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Side delts'] }
 
@@ -45,8 +48,8 @@ describe('feature calculations', () => {
 })
 
 describe('plan evaluation', () => {
-  it('does not invent add or replace recommendations without evidence', () => {
-    const result = evaluatePlan(plan, exercises, [], prefs, '2026-09-09')
+  it('does not invent add or replace recommendations for an unranked absent muscle', () => {
+    const result = evaluatePlan(plan, exercises, [], { ...defaultPreferences, goals: ['Build muscle'], priorities: [] }, '2026-09-09')
     expect(result).toEqual([])
   })
 
@@ -65,6 +68,38 @@ describe('plan evaluation', () => {
     expect(add?.trace.ruleId).toBe('add-for-priority-volume')
   })
 
+  it('uses the documented three-opportunity ceiling when a single plan has no split calendar', () => {
+    expect(PLAN_FREQUENCY_OPPORTUNITIES).toBe(3)
+  })
+
+  it('scores a higher-ranked low-volume priority add above a lower-ranked one', () => {
+    const sparsePlan: WorkoutPlan = { id: 'sparse-priority', name: 'Sparse', description: '', focus: '', exerciseIds: [cableRow.id] }
+    const history = [workout('abs', '2026-09-01', cableCrunch.id, 12), workout('upper', '2026-09-02', bench.id, 8)]
+    const recommendations = evaluatePlan(sparsePlan, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs', 'Upper chest'] }, '2026-09-09')
+    const absAdd = recommendations.find((item) => item.type === 'ADD' && item.exerciseId === cableCrunch.id)
+    const upperChestAdd = recommendations.find((item) => item.type === 'ADD' && item.exerciseId === bench.id)
+    expect(absAdd?.score).toBeGreaterThan(upperChestAdd?.score ?? 0)
+  })
+
+  it('does not duplicate an already represented high-priority muscle', () => {
+    const represented: WorkoutPlan = { id: 'abs', name: 'Abs', description: '', focus: '', exerciseIds: [cableCrunch.id] }
+    const preferences: UserPreferences = { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs'] }
+    expect(evaluatePlan(represented, exercises, [workout('abs', '2026-09-01', cableCrunch.id, 12)], preferences, '2026-09-09').some((item) => item.type === 'ADD' && item.exerciseId === cableCrunch.id)).toBe(false)
+  })
+
+  it('fills a missing high-priority slot without fabricating history', () => {
+    const sparse: WorkoutPlan = { id: 'row', name: 'Row', description: '', focus: '', exerciseIds: [cableRow.id] }
+    const preferences: UserPreferences = { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs'] }
+    const add = evaluatePlan(sparse, exercises, [], preferences, '2026-09-09').find((item) => item.type === 'ADD')
+    expect(add).toMatchObject({ exerciseId: cableCrunch.id, trace: { ruleId: 'add-for-priority-volume' } })
+    expect(add?.reasons).toContain('No direct working-set history or planned slot exists for this priority yet.')
+  })
+
+  it('does not add an unranked absent muscle with zero history', () => {
+    const sparse: WorkoutPlan = { id: 'row', name: 'Row', description: '', focus: '', exerciseIds: [cableRow.id] }
+    expect(evaluatePlan(sparse, exercises, [], { ...defaultPreferences, goals: ['Build muscle'], priorities: [] }, '2026-09-09').some((item) => item.type === 'ADD')).toBe(false)
+  })
+
   it('recommends a priority add for adequate volume that is poorly distributed', () => {
     const history: Workout[] = [{
       id: 'a', date: '2026-09-01', title: 'Shoulders', sets: Array.from({ length: 6 }, (_, index) => ({ id: `set-${index}`, exerciseId: lateralRaise.id, setType: 'working', weight: 20, reps: 12 })),
@@ -75,6 +110,63 @@ describe('plan evaluation', () => {
     expect([lateralRaise.id, 'dumbbell-shoulder-press']).toContain(add?.exerciseId)
     expect(add?.trace.ruleId).toBe('add-for-priority-frequency')
     expect(add?.trace.principleId).toBe('frequency-distribution')
+  })
+
+  it('emits one deterministic ADD when low direct volume and frequency both apply', () => {
+    const history = [workout('side-delts', '2026-09-01', lateralRaise.id, 12)]
+    const result = evaluatePlan(plan, exercises, history, prefs, '2026-09-09')
+    const adds = result.filter((item) => item.type === 'ADD')
+
+    expect(adds).toHaveLength(1)
+    expect([lateralRaise.id, 'dumbbell-shoulder-press']).toContain(adds[0]?.exerciseId)
+    expect(adds[0]?.trace.ruleId).toBe('add-for-priority-volume')
+  })
+
+  it('never emits duplicate recommendation IDs when priority needs overlap', () => {
+    const sparse: WorkoutPlan = { id: 'row', name: 'Row', description: '', focus: '', exerciseIds: [cableRow.id] }
+    const result = evaluatePlan(sparse, exercises, [], { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs', 'Lats', 'Upper chest'] }, '2026-09-09')
+    const ids = result.map((recommendation) => recommendation.id)
+
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('does not add a priority exercise when direct volume and frequency are both adequate', () => {
+    const sparse: WorkoutPlan = { id: 'row', name: 'Row', description: '', focus: '', exerciseIds: [cableRow.id] }
+    const dates = ['2026-08-27', '2026-08-29', '2026-08-31', '2026-09-02', '2026-09-04', '2026-09-06']
+    const history: Workout[] = dates.map((date, workoutIndex) => ({
+      id: `abs-${workoutIndex}`,
+      date,
+      title: 'Abs',
+      sets: Array.from({ length: 2 }, (_, setIndex) => ({ id: `abs-${workoutIndex}-${setIndex}`, exerciseId: cableCrunch.id, setType: 'working' as const, weight: 40, reps: 12 })),
+    }))
+    const result = evaluatePlan(sparse, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs'] }, '2026-09-09')
+
+    expect(result.some((item) => item.type === 'ADD' && item.exerciseId === cableCrunch.id)).toBe(false)
+  })
+
+  it('prioritizes a high-rank frequency deficiency over lower-rank low volume', () => {
+    const sparse: WorkoutPlan = { id: 'row', name: 'Row', description: '', focus: '', exerciseIds: [cableRow.id] }
+    const history: Workout[] = [{
+      id: 'abs-volume', date: '2026-09-01', title: 'Abs',
+      sets: Array.from({ length: 6 }, (_, index) => ({ id: `abs-${index}`, exerciseId: cableCrunch.id, setType: 'working' as const, weight: 40, reps: 12 })),
+    }, workout('upper', '2026-09-02', bench.id, 8)]
+    const recommendations = evaluatePlan(sparse, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs', 'Upper chest'] }, '2026-09-09')
+    const absAdd = recommendations.find((item) => item.type === 'ADD' && item.exerciseId === cableCrunch.id)
+    const upperChestAdd = recommendations.find((item) => item.type === 'ADD' && item.exerciseId === bench.id)
+
+    expect(absAdd?.trace.ruleId).toBe('add-for-priority-frequency')
+    expect(absAdd?.score).toBeGreaterThan(upperChestAdd?.score ?? 0)
+  })
+
+  it('does not turn lower-priority extra work into an automatic remove', () => {
+    const sparse: WorkoutPlan = { id: 'row', name: 'Row', description: '', focus: '', exerciseIds: [cableRow.id] }
+    const history: Workout[] = [{
+      id: 'side-delts', date: '2026-09-01', title: 'Shoulders',
+      sets: Array.from({ length: 12 }, (_, index) => ({ id: `delt-${index}`, exerciseId: lateralRaise.id, setType: 'working' as const, weight: 20, reps: 12 })),
+    }]
+    const result = evaluatePlan(sparse, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs', 'Side delts'] }, '2026-09-09')
+
+    expect(result.some((item) => item.type === 'REMOVE')).toBe(false)
   })
 
   it('does not add a push exercise to a pull-style plan for an unrelated priority', () => {

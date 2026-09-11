@@ -4,6 +4,7 @@ import { evaluateSplit } from '../domain/split-evaluator'
 import type { Split, WorkoutTemplate } from '../domain/models'
 
 const make = (id: string, exerciseIds: string[]): WorkoutTemplate => ({ id, name: id, description: '', focus: '', exerciseIds, plannedExercises: exerciseIds.map((exerciseId, order) => ({ exerciseId, order, sets: 3, repRange: exercises.find((item) => item.id === exerciseId)!.repRange, setType: 'working' as const })) })
+const makeWithSets = (id: string, entries: { exerciseId: string; sets: number }[]): WorkoutTemplate => ({ id, name: id, description: '', focus: '', exerciseIds: entries.map((entry) => entry.exerciseId), plannedExercises: entries.map((entry, order) => ({ ...entry, order, repRange: exercises.find((item) => item.id === entry.exerciseId)!.repRange, setType: 'working' as const })) })
 const split = (workoutIds: string[]): Split => ({ id: 'test-split', name: 'Test split', workoutIds })
 
 describe('evaluateSplit', () => {
@@ -62,5 +63,61 @@ describe('evaluateSplit', () => {
     const workouts = [make('one', ['cable-crunch', 'cable-lateral-raise']), make('two', ['cable-crunch', 'db-lateral-raise']), make('three', ['cable-crunch'])]
     const result = evaluateSplit(split(workouts.map((workout) => workout.id)), workouts, exercises, { goals: [], priorities: ['Abs', 'Side delts'] })
     expect(result.findings.filter((item) => item.category === 'frequency' || item.category === 'goal-alignment')).toEqual([])
+  })
+
+  it('does not count secondary involvement as direct priority split work', () => {
+    const workouts = [make('pull', ['lat-pulldown'])]
+    const result = evaluateSplit(split(['pull']), workouts, exercises, { goals: [], priorities: ['Biceps'] })
+    const missing = result.findings.find((item) => item.title.includes('Biceps has no direct split work'))
+    expect(missing).toMatchObject({ severity: 'warning' })
+  })
+
+  it('distinguishes six direct sets in one exposure from six sets across three exposures', () => {
+    const concentrated = [
+      makeWithSets('abs-heavy', [{ exerciseId: 'cable-crunch', sets: 6 }]),
+      make('pull', ['lat-pulldown']),
+      make('push', ['barbell-bench-press']),
+    ]
+    const distributed = [
+      makeWithSets('abs-one', [{ exerciseId: 'cable-crunch', sets: 2 }]),
+      makeWithSets('abs-two', [{ exerciseId: 'cable-crunch', sets: 2 }]),
+      makeWithSets('abs-three', [{ exerciseId: 'cable-crunch', sets: 2 }]),
+    ]
+    const preferences = { goals: [], priorities: ['Abs'] }
+    const concentratedResult = evaluateSplit(split(concentrated.map((workout) => workout.id)), concentrated, exercises, preferences)
+    const distributedResult = evaluateSplit(split(distributed.map((workout) => workout.id)), distributed, exercises, preferences)
+
+    expect(concentratedResult.muscleSummary.find((item) => item.muscle === 'Abs')).toMatchObject({ plannedWorkingSets: 6, workoutCount: 1 })
+    expect(distributedResult.muscleSummary.find((item) => item.muscle === 'Abs')).toMatchObject({ plannedWorkingSets: 6, workoutCount: 3 })
+    expect(concentratedResult.findings.some((item) => item.category === 'frequency' && item.title.includes('Abs'))).toBe(true)
+    expect(distributedResult.findings.some((item) => item.category === 'frequency' && item.title.includes('Abs'))).toBe(false)
+  })
+
+  it('bounds desired priority frequency by the split opportunities that actually exist', () => {
+    const workouts = [make('abs', ['cable-crunch'])]
+    const result = evaluateSplit(split(['abs']), workouts, exercises, { goals: [], priorities: ['Abs'] })
+
+    expect(result.findings.some((item) => item.category === 'frequency' && item.title.includes('Abs'))).toBe(false)
+  })
+
+  it('identifies a hierarchy inversion without escalating a small emphasis difference to a warning', () => {
+    const inverted = [
+      make('one', ['cable-lateral-raise', 'lat-pulldown', 'incline-db-bench']),
+      make('two', ['cable-row', 'incline-db-bench']),
+      make('three', ['lat-pulldown', 'incline-db-bench']),
+    ]
+    const inversion = evaluateSplit(split(inverted.map((workout) => workout.id)), inverted, exercises, { goals: [], priorities: ['Side delts', 'Lats', 'Upper chest'] })
+    expect(inversion.findings.some((item) => item.category === 'frequency' && item.title.includes('Side delts'))).toBe(true)
+    expect(inversion.findings.some((item) => item.title.includes('Side delts receives less split emphasis than Lats'))).toBe(true)
+
+    const smallDifference = [
+      makeWithSets('one', [{ exerciseId: 'cable-crunch', sets: 3 }, { exerciseId: 'cable-lateral-raise', sets: 4 }]),
+      makeWithSets('two', [{ exerciseId: 'cable-crunch', sets: 3 }, { exerciseId: 'db-lateral-raise', sets: 3 }]),
+      makeWithSets('three', [{ exerciseId: 'cable-crunch', sets: 3 }, { exerciseId: 'cable-lateral-raise', sets: 4 }]),
+    ]
+    const result = evaluateSplit(split(smallDifference.map((workout) => workout.id)), smallDifference, exercises, { goals: [], priorities: ['Abs', 'Side delts'] })
+    const emphasis = result.findings.find((item) => item.title.includes('Abs receives less split emphasis than Side delts'))
+    expect(emphasis).toMatchObject({ severity: 'info' })
+    expect(result.findings.some((item) => item.title.includes('Abs receives less split emphasis than Side delts') && item.severity === 'warning')).toBe(false)
   })
 })

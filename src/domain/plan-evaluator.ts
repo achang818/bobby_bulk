@@ -6,6 +6,13 @@ import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities
 import { plannedExercisesFor } from './workout-session'
 import type { AvailableLoad, Exercise, PlanRecommendation, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
 
+// A single workout plan has no weekly split/calendar context. Three is a
+// conservative opportunity ceiling for detecting sparse recent exposure; the
+// split evaluator replaces it with its actual number of workout opportunities.
+export const PLAN_FREQUENCY_OPPORTUNITIES = 3
+
+type PriorityAddReason = 'missing-slot' | 'low-volume' | 'low-frequency'
+
 export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): PlanRecommendation[] {
   const recommendations: PlanRecommendation[] = []
   const plannedExercises = plannedExercisesFor(plan, exercises)
@@ -16,6 +23,9 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
   })
   const otherPlanMuscles = new Set(planExercises.flatMap(({ exercise }) => exercise.primaryMuscles.map((muscle) => muscle.toLowerCase())))
   const priorityProfile = resolveMusclePriorities(preferences)
+  // One candidate can directly train more than one priority muscle. The first
+  // (therefore highest-ranked) applicable priority owns its single ADD decision.
+  const priorityAddExerciseIds = new Set<string>()
 
   for (const { exercise, planned } of planExercises) {
     const features = calculateExerciseFeatures(exercise, history, asOf)
@@ -56,15 +66,30 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
       : priorityCandidates
     const candidate = coherentCandidates[0]
     const coherenceMattered = shouldCheckCoherence && coherentCandidates.length < priorityCandidates.length
-    const lowVolume = muscle.volumeState === 'low recent volume'
-    const desiredFrequency = priorityProfile.desiredFrequency(priority, 3)
-    const lowFrequency = muscle.frequency14Days > 0 && muscle.frequency14Days < desiredFrequency * 2
-    if (!represented && candidate && (lowVolume || lowFrequency)) {
-      const trace = buildTrace(lowVolume ? 'add-for-priority-volume' : 'add-for-priority-frequency')
-      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: muscle.rolling28DaySets === 0 ? 5 : Math.max(3, 5 - Math.min(priorityRank, 2)), reasons: [`${priority} is priority #${priorityRank + 1}.`, trace.principleDescription, ...(lowFrequency ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : []), ...(lowVolume && coherenceMattered ? ["This exercise fits your plan's existing muscle groups."] : [])], trace })
+    const desiredFrequency = priorityProfile.desiredFrequency(priority, PLAN_FREQUENCY_OPPORTUNITIES)
+    const addReason = priorityAddReason(muscle, desiredFrequency)
+    if (!represented && candidate && addReason && !priorityAddExerciseIds.has(candidate.id)) {
+      // The trace taxonomy has no separate "missing slot" rule. Reusing the
+      // volume-hypertrophy trace here is intentional: it supports establishing
+      // direct work, while the explicit reason below makes clear this is not
+      // inferred historical volume or performance evidence.
+      const trace = buildTrace(addReason === 'low-frequency' ? 'add-for-priority-frequency' : 'add-for-priority-volume')
+      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: addReason === 'missing-slot' ? Math.max(4, 5 - Math.min(priorityRank, 2)) : Math.max(3, 5 - Math.min(priorityRank, 2)), reasons: [`${priority} is priority #${priorityRank + 1}.`, ...(addReason === 'missing-slot' ? ['No direct working-set history or planned slot exists for this priority yet.'] : []), trace.principleDescription, ...(addReason === 'low-frequency' ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : []), ...(addReason === 'low-volume' && coherenceMattered ? ["This exercise fits your plan's existing muscle groups."] : [])], trace })
+      priorityAddExerciseIds.add(candidate.id)
     }
   }
   return recommendations.sort((a, b) => b.score - a.score)
+}
+
+/**
+ * Priority evidence has a deterministic order. A missing direct slot is not
+ * measured low volume: the history model intentionally reports it as unknown.
+ */
+function priorityAddReason(muscle: ReturnType<typeof calculateMuscleFeatures>, desiredFrequency: number): PriorityAddReason | undefined {
+  if (muscle.historyConfidence === 'none') return 'missing-slot'
+  if (muscle.volumeState === 'low recent volume') return 'low-volume'
+  if (muscle.frequency14Days > 0 && muscle.frequency14Days < desiredFrequency * 2) return 'low-frequency'
+  return undefined
 }
 
 function historicalPerformanceEvidence(features: ReturnType<typeof calculateExerciseFeatures>): string {
