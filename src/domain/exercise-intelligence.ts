@@ -80,10 +80,20 @@ export function evaluateExerciseCandidate(request: Omit<ExerciseCandidateRequest
 
 /** Returns only hard-eligible candidates, ranked by visible structural dimensions. */
 export function findExerciseCandidates(request: ExerciseCandidateRequest): ExerciseCandidate[] {
+  return rankExerciseCandidates(evaluateExerciseCandidates(request))
+}
+
+/** Evaluates every non-identical candidate so an interface can explain exclusions. */
+export function evaluateExerciseCandidates(request: ExerciseCandidateRequest): ExerciseCandidate[] {
   const evaluationRequest = { ...request }
   return request.exercises
     .filter((candidate) => candidate.id !== request.exercise.id)
     .map((candidate) => evaluateExerciseCandidate(evaluationRequest, candidate))
+}
+
+/** Ranks only candidates that have passed the hard eligibility rules. */
+export function rankExerciseCandidates(candidates: ExerciseCandidate[]): ExerciseCandidate[] {
+  return candidates
     .filter((candidate) => candidate.eligibility === 'eligible')
     .sort(compareCandidates)
 }

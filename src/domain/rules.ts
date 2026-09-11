@@ -1,4 +1,4 @@
-import type { RecommendationTrace } from './models'
+import type { PlanRecommendation, RecommendationTrace } from './models'
 import { findPrinciple } from './knowledge-base'
 
 export const decisionRules = {
@@ -6,6 +6,7 @@ export const decisionRules = {
   'keep-stable-exercise': 'consistent-execution',
   'replace-on-stall': 'plateau-variation',
   'replace-on-stall-specific': 'muscle-specific-loading',
+  'replace-on-regression': 'personal-history',
   'add-for-priority-volume': 'volume-hypertrophy',
   'add-for-priority-frequency': 'frequency-distribution',
   'adapt-unavailable-equipment': 'equipment-constraint',
@@ -23,4 +24,13 @@ export function buildTrace(ruleId: DecisionRuleId): RecommendationTrace {
     evidenceLevel: principle.evidenceLevel,
     source: principle.source,
   }
+}
+
+/** Recommendation-type priority only; never an exercise-quality score. */
+export function compareRecommendations(left: PlanRecommendation, right: PlanRecommendation, exerciseOrder: ReadonlyMap<string, number> = new Map()) {
+  const priority = right.score - left.score
+  if (priority) return priority
+  const leftOrder = exerciseOrder.get(left.exerciseId) ?? Number.MAX_SAFE_INTEGER
+  const rightOrder = exerciseOrder.get(right.exerciseId) ?? Number.MAX_SAFE_INTEGER
+  return leftOrder - rightOrder || left.id.localeCompare(right.id)
 }

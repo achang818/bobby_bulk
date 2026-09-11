@@ -1,9 +1,9 @@
 import { buildTrace } from './rules'
 import { equipmentTagFor } from './equipment'
-import { findExerciseCandidates } from './exercise-intelligence'
+import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
-import type { EquipmentTag, Exercise, ExerciseCandidate, PlanRecommendation, TodaysContext, UserPreferences, WorkoutPlan } from './models'
+import type { Exercise, ExerciseCandidate, PlanRecommendation, TodaysContext, UserPreferences, WorkoutPlan } from './models'
 
 // The limit protects a familiar workout from unnecessary churn; it is contextual, not universal.
 export const MAX_CONTEXTUAL_SUBSTITUTIONS = 2
@@ -17,8 +17,9 @@ export function findContextualSubstitute(exercise: Exercise, exercises: Exercise
 /** Context-specific adapter over the reusable exercise-intelligence pipeline. */
 export function findContextualCandidates(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set()): ExerciseCandidate[] {
   if (!todaysContext.unavailableEquipment.includes(equipmentTagFor(exercise))) return []
-  return findExerciseCandidates({
-    exercise,
+  return findExerciseReplacement({
+    originalExercise: exercise,
+    reason: 'equipment-unavailable',
     exercises,
     goals: preferences.goals,
     priorityMuscles: resolveMusclePriorities(preferences).orderedMuscles,
@@ -28,7 +29,7 @@ export function findContextualCandidates(exercise: Exercise, exercises: Exercise
       requireSameCategory: true,
     },
     preferences,
-  })
+  }).rankedCandidates
 }
 
 export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): PlanRecommendation[] {
@@ -54,7 +55,7 @@ export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysCon
       exerciseId: exercise.id,
       alternativeExerciseId: alternative.exercise.id,
       score: 6,
-      reasons: [`${equipmentLabel(equipmentTagFor(exercise))} unavailable today`, ...alternative.reasons.slice(0, 3)],
+      reasons: [replacementReasonDescription('equipment-unavailable'), ...alternative.reasons.slice(0, 3)],
       trace,
     }]
   })
@@ -123,5 +124,3 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
 function protectionScore(exercise: Exercise, goalCritical: Set<string>) {
   return (goalCritical.has(exercise.id) ? 2 : 0) + (exercise.type === 'compound' ? 1 : 0)
 }
-
-function equipmentLabel(tag: EquipmentTag) { return tag === 'cables' ? 'Cable machine' : tag.replace('-', ' ') }

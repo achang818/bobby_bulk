@@ -1,6 +1,7 @@
 import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { recommendNext } from './progression'
-import { buildTrace } from './rules'
+import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
+import { buildTrace, compareRecommendations } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
 import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
@@ -22,6 +23,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     return exercise ? [{ exercise, planned }] : []
   })
   const otherPlanMuscles = new Set(planExercises.flatMap(({ exercise }) => exercise.primaryMuscles.map((muscle) => muscle.toLowerCase())))
+  const exerciseOrder = new Map(plannedExercises.map((planned, index) => [planned.exerciseId, index]))
   const priorityProfile = resolveMusclePriorities(preferences)
   // One candidate can directly train more than one priority muscle. The first
   // (therefore highest-ranked) applicable priority owns its single ADD decision.
@@ -40,15 +42,25 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
       const trace = buildTrace('keep-stable-exercise')
       recommendations.push({ id: `keep-${plan.id}-${exercise.id}`, type: 'KEEP', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 5 : 4, reasons: [trace.principleDescription, `Your recent performance is ${features.progressionState}.`], trace })
     }
-    if (features.sessionsPerformed >= 3 && features.progressionState === 'stalled' && preferenceState !== 'excluded' && rejectedKeepCount(exercise.id, decisions) < 2) {
-      const alternatives = exercises
-        .filter((candidate) => candidate.id !== exercise.id && !planExerciseIds.has(candidate.id) && candidate.category === exercise.category && candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)) && classifyPreference(candidate.id, preferences, decisions) !== 'excluded')
-        .sort((a, b) => specificityScore(b, exercise) - specificityScore(a, exercise))
-      const alternative = alternatives[0]
+    const replacementReason = features.progressionState === 'stalled' ? 'stalled' : features.progressionState === 'regressing' ? 'regressing' : undefined
+    if (features.sessionsPerformed >= 3 && replacementReason && preferenceState !== 'excluded' && rejectedKeepCount(exercise.id, decisions) < 2) {
+      // The state establishes that replacement is warranted. Candidate
+      // eligibility and ranking are shared with contextual substitutions.
+      const replacement = findExerciseReplacement({
+        originalExercise: exercise,
+        reason: replacementReason,
+        exercises,
+        goals: preferences.goals,
+        priorityMuscles: priorityProfile.orderedMuscles,
+        constraints: { excludedExerciseIds: [...planExerciseIds], requireSameCategory: true },
+        preferences,
+        decisions,
+      })
+      const alternative = replacement.selectedCandidate
       if (alternative) {
-        const specific = specificityScore(alternative, exercise) > 0
-        const trace = buildTrace(specific ? 'replace-on-stall-specific' : 'replace-on-stall')
-        recommendations.push({ id: `replace-${plan.id}-${exercise.id}`, type: 'REPLACE', exerciseId: exercise.id, alternativeExerciseId: alternative.id, score: 4, reasons: [trace.principleDescription, `${alternative.name} trains a similar movement and muscle target.`], trace })
+        const specific = replacementReason === 'stalled' && isSpecificIsolationReplacement(alternative.exercise, exercise)
+        const trace = buildTrace(replacementReason === 'regressing' ? 'replace-on-regression' : specific ? 'replace-on-stall-specific' : 'replace-on-stall')
+        recommendations.push({ id: `replace-${plan.id}-${exercise.id}`, type: 'REPLACE', exerciseId: exercise.id, alternativeExerciseId: alternative.exercise.id, score: 4, reasons: [replacementReasonDescription(replacementReason), ...alternative.reasons.slice(0, 3)], trace })
       }
     }
   }
@@ -78,7 +90,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
       priorityAddExerciseIds.add(candidate.id)
     }
   }
-  return recommendations.sort((a, b) => b.score - a.score)
+  return recommendations.sort((left, right) => compareRecommendations(left, right, exerciseOrder))
 }
 
 /**
@@ -104,8 +116,8 @@ function historicalPerformanceEvidence(features: ReturnType<typeof calculateExer
 
 function round(value: number) { return Math.round(value * 10) / 10 }
 
-function specificityScore(candidate: Exercise, stalledExercise: Exercise): number {
-  if (stalledExercise.type !== 'isolation' || candidate.type !== 'isolation') return 0
+function isSpecificIsolationReplacement(candidate: Exercise, stalledExercise: Exercise): boolean {
+  if (stalledExercise.type !== 'isolation' || candidate.type !== 'isolation') return false
   const stalledMuscles = new Set(stalledExercise.primaryMuscles)
-  return stalledMuscles.size === candidate.primaryMuscles.length && candidate.primaryMuscles.every((muscle) => stalledMuscles.has(muscle)) ? 1 : 0
+  return stalledMuscles.size === candidate.primaryMuscles.length && candidate.primaryMuscles.every((muscle) => stalledMuscles.has(muscle))
 }

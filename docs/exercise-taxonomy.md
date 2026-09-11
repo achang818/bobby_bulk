@@ -67,3 +67,25 @@ removed. Older persisted `dislikedExerciseIds` are treated as exclusions for
 compatibility. This layer does not yet decide whether a workout should change,
 model fatigue, or calculate volume; those remain responsibilities of their
 existing evaluators and later milestones.
+
+## Shared replacement flow
+
+`exercise-replacement.ts` is the shared bridge between a rule that establishes
+a change is warranted and the candidate pipeline. It records the replacement
+reason, preserves all evaluated candidates for explanation, then exposes the
+hard-eligible candidates in their deterministic order. It does not decide
+whether an exercise needs to change and it does not assign a recommendation
+priority score.
+
+Equipment adaptation invokes this flow only when the original equipment is
+unavailable. Plan evaluation invokes the same flow only after at least three
+completed sessions have produced either a `stalled` or `regressing` exercise
+state. Stable and progressing exercises are not rotated merely because time has
+passed. Time adaptation remains separate: it reduces sets and then removes
+lower-protection work; it does not request exercise replacements.
+
+Recommendation `score` values rank recommendation types such as `REPLACE`,
+`KEEP`, and `MODIFY` against one another. They are not candidate-quality or
+physiological scores. Within a replacement, the lexicographic candidate order
+described above is used. Ties between recommendation types use workout order
+when available and then a stable recommendation ID.

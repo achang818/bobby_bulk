@@ -131,6 +131,8 @@ export type WorkloadTrend = 'increasing' | 'stable' | 'decreasing' | 'insufficie
 export type ExerciseRole = 'primary-compound' | 'secondary-compound' | 'isolation' | 'accessory' | 'goal-critical' | 'optional-variation'
 export type ExerciseCompatibility = 'strong' | 'reasonable' | 'weak'
 export type ExerciseCandidateEligibility = 'eligible' | 'excluded' | 'unavailable-equipment' | 'category-mismatch' | 'missing-direct-primary-target'
+/** The rule that established a replacement is warranted. */
+export type ExerciseReplacementReason = 'equipment-unavailable' | 'stalled' | 'regressing'
 
 /** Structural comparison only; it does not decide whether a replacement is allowed. */
 export interface ExerciseSimilarity {
@@ -177,6 +179,27 @@ export interface ExerciseCandidateRequest {
   constraints?: ExerciseCandidateConstraints
   preferences?: Pick<UserPreferences, 'preferredExerciseIds' | 'recommendLessExerciseIds' | 'excludedExerciseIds' | 'dislikedExerciseIds'>
   decisions?: RecommendationDecision[]
+}
+
+/** Shared replacement request. The caller establishes whether replacement is warranted first. */
+export interface ExerciseReplacementRequest {
+  originalExercise: Exercise
+  reason: ExerciseReplacementReason
+  exercises: Exercise[]
+  role?: ExerciseRole
+  goals?: readonly TrainingGoal[]
+  priorityMuscles?: string[]
+  constraints?: ExerciseCandidateConstraints
+  preferences?: ExerciseCandidateRequest['preferences']
+  decisions?: RecommendationDecision[]
+}
+
+/** Candidate evidence is retained so callers can explain both eligibility and selection. */
+export interface ExerciseReplacementResult {
+  reason: ExerciseReplacementReason
+  consideredCandidates: ExerciseCandidate[]
+  rankedCandidates: ExerciseCandidate[]
+  selectedCandidate?: ExerciseCandidate
 }
 
 export type PrescriptionCompletion = 'completed' | 'partial' | 'below target' | 'not started' | 'unplanned'
