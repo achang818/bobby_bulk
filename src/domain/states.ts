@@ -254,9 +254,10 @@ export function rejectedKeepCount(exerciseId: string, decisions: RecommendationD
   return decisions.filter((item) => item.exerciseId === exerciseId && ['REPLACE', 'REMOVE'].includes(item.recommendationType) && ['rejected', 'dismissed'].includes(item.decision)).length
 }
 
-export function classifyPreference(exerciseId: string, preferences: { preferredExerciseIds: string[]; dislikedExerciseIds: string[] }, decisions: RecommendationDecision[] = []): PreferenceState {
+export function classifyPreference(exerciseId: string, preferences: { preferredExerciseIds: string[]; recommendLessExerciseIds?: string[]; excludedExerciseIds?: string[]; dislikedExerciseIds?: string[] }, decisions: RecommendationDecision[] = []): PreferenceState {
+  if (preferences.excludedExerciseIds?.includes(exerciseId) || preferences.dislikedExerciseIds?.includes(exerciseId)) return 'excluded'
   if (preferences.preferredExerciseIds.includes(exerciseId)) return 'preferred'
-  if (preferences.dislikedExerciseIds.includes(exerciseId)) return 'disliked'
+  if (preferences.recommendLessExerciseIds?.includes(exerciseId)) return 'recommend-less'
   if (rejectedKeepCount(exerciseId, decisions) >= 2) return 'preferred'
   return 'neutral'
 }

@@ -36,13 +36,13 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
       const trace = buildTrace('double-progression')
       recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: [progression.reasons[0], historicalPerformanceEvidence(features), progression.reasons[1]], trace })
     }
-    if (features.sessionsPerformed >= 2 && goalAligned && preferenceState !== 'disliked' && ['progressing', 'stable'].includes(features.progressionState)) {
+    if (features.sessionsPerformed >= 2 && goalAligned && preferenceState !== 'excluded' && ['progressing', 'stable'].includes(features.progressionState)) {
       const trace = buildTrace('keep-stable-exercise')
       recommendations.push({ id: `keep-${plan.id}-${exercise.id}`, type: 'KEEP', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 5 : 4, reasons: [trace.principleDescription, `Your recent performance is ${features.progressionState}.`], trace })
     }
-    if (features.sessionsPerformed >= 3 && features.progressionState === 'stalled' && preferenceState !== 'disliked' && rejectedKeepCount(exercise.id, decisions) < 2) {
+    if (features.sessionsPerformed >= 3 && features.progressionState === 'stalled' && preferenceState !== 'excluded' && rejectedKeepCount(exercise.id, decisions) < 2) {
       const alternatives = exercises
-        .filter((candidate) => candidate.id !== exercise.id && !planExerciseIds.has(candidate.id) && candidate.category === exercise.category && candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)) && classifyPreference(candidate.id, preferences, decisions) !== 'disliked')
+        .filter((candidate) => candidate.id !== exercise.id && !planExerciseIds.has(candidate.id) && candidate.category === exercise.category && candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)) && classifyPreference(candidate.id, preferences, decisions) !== 'excluded')
         .sort((a, b) => specificityScore(b, exercise) - specificityScore(a, exercise))
       const alternative = alternatives[0]
       if (alternative) {
@@ -57,7 +57,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     const muscle = calculateMuscleFeatures(priority, exercises, history, asOf)
     const represented = planExercises.some(({ exercise }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === priority.toLowerCase()))
     const normalizedPriority = priority.toLowerCase()
-    const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'disliked' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))))
+    const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'excluded' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))))
     // Sparse plans have too little existing context to constrain a legitimate priority add.
     const shouldCheckCoherence = plannedExercises.length >= 2 && otherPlanMuscles.size > 0
     const coherentCandidates = shouldCheckCoherence

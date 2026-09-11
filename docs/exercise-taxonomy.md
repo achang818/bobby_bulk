@@ -38,7 +38,32 @@ does not turn those fields into a general similarity score.
 Today, the stalled-exercise replacement path requires the same catalog category
 and direct primary-muscle overlap; for isolation exercises it prefers an exact
 primary-muscle match. It does not treat matching `primaryAction` as sufficient.
-The equipment-context substitution path also scores a matching
-`movementPattern` after preserving category and a direct primary target. These
-are intentionally narrow, deterministic rules rather than a general similarity
-engine.
+The equipment-context substitution path uses the exercise-intelligence
+candidate pipeline with the same category and a direct primary target as hard
+constraints. It then ranks eligible candidates by role preservation,
+priority-muscle direct work, structural compatibility, goal fit, and soft user
+preferences. A matching `movementPattern` contributes to structural
+compatibility; it is not enough on its own. These are intentionally narrow,
+deterministic rules rather than a general similarity engine.
+
+## Exercise-intelligence candidates
+
+`exercise-intelligence.ts` keeps structural similarity separate from candidate
+selection. It can describe direct and supporting muscle overlap, movement
+pattern, action, type, category, and goal overlap without calling two exercises
+equivalent. Candidate selection then applies hard constraints (excluded
+exercise, unavailable equipment, required category, and a direct primary-muscle
+target) before ranking the remaining candidates.
+
+The replacement role is provided by the workout context rather than stored as a
+permanent catalog property. A primary or secondary compound role therefore
+favors another compound; an isolation or accessory role favors another
+isolation. This prevents an isolation movement with some muscle overlap from
+quietly becoming the best replacement for a primary compound.
+
+Preferences are deterministic inputs: preferred exercises receive a soft boost,
+recommend-less exercises receive a soft penalty, and excluded exercises are
+removed. Older persisted `dislikedExerciseIds` are treated as exclusions for
+compatibility. This layer does not yet decide whether a workout should change,
+model fatigue, or calculate volume; those remain responsibilities of their
+existing evaluators and later milestones.

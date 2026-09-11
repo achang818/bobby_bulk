@@ -110,6 +110,11 @@ export interface UserPreferences {
   goals: TrainingGoal[]
   priorities: string[]
   preferredExerciseIds: string[]
+  /** Soft negative feedback: the exercise remains selectable, but ranks lower. */
+  recommendLessExerciseIds: string[]
+  /** Hard selection constraint for normal exercise recommendations. */
+  excludedExerciseIds: string[]
+  /** @deprecated Legacy persisted exclusions. New callers should use `excludedExerciseIds`. */
   dislikedExerciseIds: string[]
   availableEquipment: string[]
   defaultGymId?: string
@@ -118,9 +123,61 @@ export interface UserPreferences {
 
 export type ExerciseProgressState = 'progressing' | 'stable' | 'stalled' | 'regressing' | 'insufficient history'
 export type MuscleVolumeState = 'low recent volume' | 'moderate recent volume' | 'high recent volume' | 'insufficient history'
-export type PreferenceState = 'preferred' | 'neutral' | 'disliked' | 'unknown'
+export type PreferenceState = 'preferred' | 'neutral' | 'recommend-less' | 'excluded' | 'unknown'
 export type HistoryConfidence = 'none' | 'limited' | 'moderate' | 'strong'
 export type WorkloadTrend = 'increasing' | 'stable' | 'decreasing' | 'insufficient history'
+
+/** The intended role to preserve when considering a replacement in one workout. */
+export type ExerciseRole = 'primary-compound' | 'secondary-compound' | 'isolation' | 'accessory' | 'goal-critical' | 'optional-variation'
+export type ExerciseCompatibility = 'strong' | 'reasonable' | 'weak'
+export type ExerciseCandidateEligibility = 'eligible' | 'excluded' | 'unavailable-equipment' | 'category-mismatch' | 'missing-direct-primary-target'
+
+/** Structural comparison only; it does not decide whether a replacement is allowed. */
+export interface ExerciseSimilarity {
+  sameExercise: boolean
+  directPrimaryMuscleOverlap: string[]
+  supportingMuscleOverlap: string[]
+  movementPatternMatch: boolean
+  primaryActionMatch: boolean
+  typeMatch: boolean
+  categoryMatch: boolean
+  goalOverlap: TrainingGoal[]
+}
+
+/** Explainable result for one possible exercise candidate. */
+export interface ExerciseCandidate {
+  exercise: Exercise
+  similarity: ExerciseSimilarity
+  compatibility: ExerciseCompatibility
+  eligibility: ExerciseCandidateEligibility
+  roleMatch: 'preserved' | 'changed'
+  muscleMatch: 'direct' | 'supporting-only' | 'none'
+  movementMatch: boolean
+  equipmentMatch: boolean
+  goalMatch: boolean
+  priorityMuscleRank?: number
+  preference: PreferenceState
+  preferenceAdjustment: 'boost' | 'none' | 'penalty' | 'excluded'
+  reasons: string[]
+}
+
+export interface ExerciseCandidateConstraints {
+  unavailableEquipment?: EquipmentTag[]
+  excludedExerciseIds?: readonly string[]
+  requireSameCategory?: boolean
+}
+
+/** Context for deterministic candidate generation and ranking, not a recommendation itself. */
+export interface ExerciseCandidateRequest {
+  exercise: Exercise
+  exercises: Exercise[]
+  role?: ExerciseRole
+  goals?: readonly TrainingGoal[]
+  priorityMuscles?: string[]
+  constraints?: ExerciseCandidateConstraints
+  preferences?: Pick<UserPreferences, 'preferredExerciseIds' | 'recommendLessExerciseIds' | 'excludedExerciseIds' | 'dislikedExerciseIds'>
+  decisions?: RecommendationDecision[]
+}
 
 export type PrescriptionCompletion = 'completed' | 'partial' | 'below target' | 'not started' | 'unplanned'
 export interface PerformedSet {

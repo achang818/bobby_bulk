@@ -1,43 +1,34 @@
 import { buildTrace } from './rules'
-import { classifyPreference } from './states'
+import { equipmentTagFor } from './equipment'
+import { findExerciseCandidates } from './exercise-intelligence'
+import { resolveMusclePriorities } from './muscle-priorities'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
-import type { EquipmentTag, Exercise, PlanRecommendation, TodaysContext, UserPreferences, WorkoutPlan } from './models'
+import type { EquipmentTag, Exercise, ExerciseCandidate, PlanRecommendation, TodaysContext, UserPreferences, WorkoutPlan } from './models'
 
 // The limit protects a familiar workout from unnecessary churn; it is contextual, not universal.
 export const MAX_CONTEXTUAL_SUBSTITUTIONS = 2
 export const MINUTES_PER_WORKING_SET = 3
 export const MINUTES_PER_EXERCISE_TRANSITION = 2
 
-export function equipmentTagFor(exercise: Exercise): EquipmentTag {
-  const normalized = exercise.equipment.toLowerCase()
-  if (normalized.includes('dumbbell')) return 'dumbbells'
-  if (normalized.includes('barbell')) return 'barbells'
-  if (normalized.includes('cable')) return 'cables'
-  if (normalized.includes('machine')) return 'machines'
-  if (normalized.includes('bench')) return 'benches'
-  if (normalized.includes('pull-up') || normalized.includes('pull up')) return 'pull-up-bar'
-  if (normalized.includes('kettlebell')) return 'kettlebells'
-  if (normalized.includes('trap bar')) return 'trap-bar'
-  if (normalized.includes('bodyweight')) return 'bodyweight'
-  return 'other'
-}
-
 export function findContextualSubstitute(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set()): Exercise | undefined {
-  if (!todaysContext.unavailableEquipment.includes(equipmentTagFor(exercise))) return undefined
-  return exercises
-    .filter((candidate) => candidate.id !== exercise.id)
-    .filter((candidate) => !excludedExerciseIds.has(candidate.id))
-    .filter((candidate) => !todaysContext.unavailableEquipment.includes(equipmentTagFor(candidate)))
-    .filter((candidate) => candidate.category === exercise.category)
-    .filter((candidate) => candidate.primaryMuscles.some((muscle) => exercise.primaryMuscles.includes(muscle)))
-    .filter((candidate) => classifyPreference(candidate.id, preferences) !== 'disliked')
-    .sort((a, b) => substituteScore(b, exercise, preferences) - substituteScore(a, exercise, preferences))[0]
+  return findContextualCandidates(exercise, exercises, todaysContext, preferences, excludedExerciseIds)[0]?.exercise
 }
 
-function substituteScore(candidate: Exercise, original: Exercise, preferences: UserPreferences): number {
-  return (candidate.movementPattern === original.movementPattern ? 4 : 0)
-    + (candidate.type === original.type ? 1 : 0)
-    + (classifyPreference(candidate.id, preferences) === 'preferred' ? 1 : 0)
+/** Context-specific adapter over the reusable exercise-intelligence pipeline. */
+export function findContextualCandidates(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set()): ExerciseCandidate[] {
+  if (!todaysContext.unavailableEquipment.includes(equipmentTagFor(exercise))) return []
+  return findExerciseCandidates({
+    exercise,
+    exercises,
+    goals: preferences.goals,
+    priorityMuscles: resolveMusclePriorities(preferences).orderedMuscles,
+    constraints: {
+      unavailableEquipment: todaysContext.unavailableEquipment,
+      excludedExerciseIds: [...excludedExerciseIds],
+      requireSameCategory: true,
+    },
+    preferences,
+  })
 }
 
 export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): PlanRecommendation[] {
@@ -53,17 +44,17 @@ export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysCon
     if (substitutions >= limit) return []
     const exercise = exercises.find((item) => item.id === exerciseId)
     if (!exercise) return []
-    const alternative = findContextualSubstitute(exercise, exercises, todaysContext, preferences, selectedSubstituteIds)
+    const alternative = findContextualCandidates(exercise, exercises, todaysContext, preferences, selectedSubstituteIds)[0]
     if (!alternative) return []
     substitutions += 1
-    selectedSubstituteIds.add(alternative.id)
+    selectedSubstituteIds.add(alternative.exercise.id)
     return [{
       id: `context-${plan.id}-${exercise.id}`,
       type: 'REPLACE',
       exerciseId: exercise.id,
-      alternativeExerciseId: alternative.id,
+      alternativeExerciseId: alternative.exercise.id,
       score: 6,
-      reasons: [`${equipmentLabel(equipmentTagFor(exercise))} unavailable today`, `${alternative.name} preserves the planned category and a primary muscle target.`],
+      reasons: [`${equipmentLabel(equipmentTagFor(exercise))} unavailable today`, ...alternative.reasons.slice(0, 3)],
       trace,
     }]
   })
