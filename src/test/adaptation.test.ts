@@ -43,6 +43,18 @@ describe('context adaptation', () => {
     expect(substitute?.primaryMuscles.some((muscle) => original.primaryMuscles.includes(muscle))).toBe(true)
   })
 
+  it('prefers the matching movement pattern among otherwise eligible substitutes', () => {
+    const original = exercises.find((exercise) => exercise.id === 'cable-row')!
+    const horizontalRow = exercises.find((exercise) => exercise.id === 'barbell-row')!
+    const verticalPull = exercises.find((exercise) => exercise.id === 'pull-up')!
+
+    const substitute = findContextualSubstitute(original, [original, verticalPull, horizontalRow], context(), defaultPreferences)
+
+    expect(verticalPull.category).toBe(original.category)
+    expect(verticalPull.primaryMuscles.some((muscle) => original.primaryMuscles.includes(muscle))).toBe(true)
+    expect(substitute?.id).toBe(horizontalRow.id)
+  })
+
   it('never chooses a disliked substitute', () => {
     const original = exercises.find((exercise) => exercise.id === 'cable-row')!
     const substitute = findContextualSubstitute(original, exercises, context(), { ...defaultPreferences, dislikedExerciseIds: ['barbell-row', 'chest-supported-row', 'single-arm-db-row'] })

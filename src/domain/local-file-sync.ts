@@ -1,14 +1,16 @@
 import { PERSISTED_STORAGE_KEYS } from './storage'
 
 export type LocalFileData = Partial<Record<(typeof PERSISTED_STORAGE_KEYS)[number], string | null>>
-export interface LocalFileSnapshot { version: number; data: LocalFileData }
+export interface LocalFileSnapshot { version: number; revision?: number; data: LocalFileData }
 
 const endpoint = '/api/bobby-data'
+let latestKnownRevision = 0
 
 /** Captures all Bobby-owned browser values without coupling callers to storage keys. */
 export function snapshotBrowserData(): LocalFileSnapshot {
   return {
     version: 1,
+    revision: latestKnownRevision,
     data: Object.fromEntries(PERSISTED_STORAGE_KEYS.map((key) => [key, localStorage.getItem(key)])),
   }
 }
@@ -27,12 +29,16 @@ export function restoreBrowserData(snapshot: LocalFileSnapshot) {
 export async function loadLocalFileSnapshot(): Promise<LocalFileSnapshot> {
   const response = await fetch(endpoint)
   if (!response.ok) throw new Error(`Could not load local data (${response.status})`)
-  return normalizeSnapshot(await response.json())
+  const snapshot = normalizeSnapshot(await response.json())
+  latestKnownRevision = snapshot.revision ?? 0
+  return snapshot
 }
 
 export async function saveLocalFileSnapshot(snapshot = snapshotBrowserData()) {
   const response = await fetch(endpoint, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(snapshot), keepalive: true })
   if (!response.ok) throw new Error(`Could not save local data (${response.status})`)
+  const revision = Number(response.headers.get('X-Bobby-Data-Revision'))
+  if (Number.isSafeInteger(revision) && revision >= 0) latestKnownRevision = revision
 }
 
 export function normalizeSnapshot(value: unknown): LocalFileSnapshot {
@@ -43,5 +49,7 @@ export function normalizeSnapshot(value: unknown): LocalFileSnapshot {
     const item = (candidate.data as Record<string, unknown>)[key]
     return typeof item === 'string' || item === null ? [[key, item]] : []
   })) as LocalFileData
-  return { version: 1, data }
+  return { version: 1, ...(validRevision(candidate.revision) ? { revision: candidate.revision } : {}), data }
 }
+
+function validRevision(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 }

@@ -1,15 +1,19 @@
 export type ExerciseType = 'compound' | 'isolation'
-export type MovementPattern = 'horizontal-pull' | 'vertical-pull' | 'horizontal-push' | 'vertical-push' | 'knee-dominant' | 'hip-hinge' | 'carry' | 'isolation' | 'other'
-export type JointAction = 'elbow-flexion' | 'elbow-extension' | 'shoulder-flexion' | 'shoulder-extension' | 'shoulder-abduction' | 'shoulder-adduction' | 'shoulder-horizontal-adduction' | 'shoulder-horizontal-abduction' | 'hip-flexion' | 'hip-extension' | 'hip-abduction' | 'hip-adduction' | 'knee-flexion' | 'knee-extension' | 'ankle-plantarflexion' | 'ankle-dorsiflexion' | 'trunk-flexion' | 'trunk-extension' | 'trunk-rotation' | 'trunk-stability' | 'scapular-retraction' | 'scapular-elevation'
+/** Broad structural movement category, used to preserve exercise intent. */
+export type MovementPattern = 'horizontal-pull' | 'vertical-pull' | 'horizontal-push' | 'vertical-push' | 'knee-dominant' | 'hip-hinge' | 'carry' | 'trunk-flexion' | 'isolation' | 'other'
+/** Specific primary anatomical or joint action; this is not a movement-pattern label. */
+export type JointAction = 'elbow-flexion' | 'elbow-extension' | 'shoulder-flexion' | 'shoulder-extension' | 'shoulder-abduction' | 'shoulder-adduction' | 'shoulder-horizontal-adduction' | 'shoulder-horizontal-abduction' | 'hip-flexion' | 'hip-extension' | 'hip-abduction' | 'hip-adduction' | 'knee-flexion' | 'knee-extension' | 'ankle-plantarflexion' | 'ankle-dorsiflexion' | 'spinal-flexion' | 'trunk-extension' | 'trunk-rotation' | 'trunk-stability' | 'scapular-retraction' | 'scapular-elevation'
 
 export interface Exercise {
   id: string
   name: string
+  /** Catalog/UI grouping, not a biomechanical movement classification. */
   category: string
   equipment: string
   primaryMuscles: string[]
   secondaryMuscles: string[]
   goals: string[]
+  /** Whether the exercise is treated as compound or isolation for plan structure. */
   type: ExerciseType
   movementPattern: MovementPattern
   primaryAction: JointAction

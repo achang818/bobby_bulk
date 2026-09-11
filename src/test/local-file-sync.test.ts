@@ -11,4 +11,9 @@ describe('local JSON snapshot validation', () => {
     expect(normalizeSnapshot({ version: 1, data: { 'bobby-bulk-workouts': 42 } })).toEqual({ version: 1, data: {} })
     expect(normalizeSnapshot({ version: 2, data: {} })).toEqual({ version: 0, data: {} })
   })
+
+  it('keeps a valid local-file revision so stale writers can be rejected by the server', () => {
+    expect(normalizeSnapshot({ version: 1, revision: 4, data: {} })).toEqual({ version: 1, revision: 4, data: {} })
+    expect(normalizeSnapshot({ version: 1, revision: -1, data: {} })).toEqual({ version: 1, data: {} })
+  })
 })

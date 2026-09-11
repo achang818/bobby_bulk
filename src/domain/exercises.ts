@@ -335,7 +335,7 @@ export const exercises: Exercise[] = [
     type: 'compound',
     repRange: { min: 10, max: 15 },
     defaultSets: 3,
-    movementPattern: 'isolation',
+    movementPattern: 'vertical-pull',
     primaryAction: 'shoulder-abduction',
   },
 
@@ -952,7 +952,7 @@ export const exercises: Exercise[] = [
     repRange: { min: 10, max: 15 },
     defaultSets: 3,
     movementPattern: 'isolation',
-    primaryAction: 'trunk-flexion',
+    primaryAction: 'spinal-flexion',
   },
 
   {
@@ -967,7 +967,24 @@ export const exercises: Exercise[] = [
     repRange: { min: 10, max: 15 },
     defaultSets: 3,
     movementPattern: 'isolation',
-    primaryAction: 'trunk-flexion',
+    primaryAction: 'spinal-flexion',
+  },
+
+  {
+    id: 'sit-up',
+    name: 'Sit-Up',
+    category: 'Isolation',
+    equipment: 'Bodyweight',
+    primaryMuscles: ['Abs'],
+    secondaryMuscles: ['Hip flexors'],
+    goals: ['Build muscle', 'General fitness'],
+    type: 'isolation',
+    repRange: { min: 8, max: 15 },
+    defaultSets: 3,
+    // A sit-up includes substantial hip flexion, unlike a crunch's focused
+    // vertebral flexion. Keep that broader movement distinction explicit.
+    movementPattern: 'trunk-flexion',
+    primaryAction: 'hip-flexion',
   },
 
   {
@@ -982,7 +999,7 @@ export const exercises: Exercise[] = [
     repRange: { min: 8, max: 15 },
     defaultSets: 3,
     movementPattern: 'isolation',
-    primaryAction: 'trunk-flexion',
+    primaryAction: 'hip-flexion',
   },
 
   {
