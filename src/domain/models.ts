@@ -98,7 +98,7 @@ export interface WorkoutTemplate {
 
 export type WorkoutPlan = WorkoutTemplate
 
-export type TrainingGoal = 'Build muscle' | 'Get stronger' | 'Improve athletic performance' | 'Improve a specific skill' | 'General fitness'
+export type TrainingGoal = 'Build muscle' | 'Get stronger' | 'Improve athletic performance' | 'Improve a specific skill' | 'General fitness' | 'Aesthetic physique'
 export type WeightUnit = 'kg' | 'lb'
 
 export interface UserPreferences {

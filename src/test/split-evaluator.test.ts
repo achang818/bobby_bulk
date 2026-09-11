@@ -50,4 +50,17 @@ describe('evaluateSplit', () => {
     expect(result.findings.some((item) => item.category === 'goal-alignment' && item.title.includes('Lats'))).toBe(true)
     expect(result.overallAssessment.goalAlignment).toBe('limited')
   })
+
+  it('flags a split that gives a lower priority more direct frequency than a high priority', () => {
+    const workouts = [make('abs', ['cable-crunch']), make('delt-a', ['cable-lateral-raise']), make('delt-b', ['db-lateral-raise'])]
+    const result = evaluateSplit(split(workouts.map((workout) => workout.id)), workouts, exercises, { goals: [], priorities: ['Abs', 'Side delts'] })
+    expect(result.findings.some((item) => item.category === 'frequency' && item.title.includes('Abs'))).toBe(true)
+    expect(result.findings.some((item) => item.title.includes('Abs receives less split emphasis than Side delts'))).toBe(true)
+  })
+
+  it('does not flag a split already aligned with practical priority frequency', () => {
+    const workouts = [make('one', ['cable-crunch', 'cable-lateral-raise']), make('two', ['cable-crunch', 'db-lateral-raise']), make('three', ['cable-crunch'])]
+    const result = evaluateSplit(split(workouts.map((workout) => workout.id)), workouts, exercises, { goals: [], priorities: ['Abs', 'Side delts'] })
+    expect(result.findings.filter((item) => item.category === 'frequency' || item.category === 'goal-alignment')).toEqual([])
+  })
 })

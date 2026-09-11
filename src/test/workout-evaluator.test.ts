@@ -27,4 +27,8 @@ describe('evaluateWorkout', () => {
     expect(evaluateWorkout(plan(['barbell-bench-press', 'dumbbell-bench-press', 'machine-chest-press']), exercises, { availableMinutes: 10 }).findings.some((item) => item.category === 'duration' && item.severity === 'warning')).toBe(true)
     expect(evaluateWorkout(plan([]), exercises).findings.some((item) => item.title === 'No exercises planned')).toBe(true)
   })
+  it('protects fresher work for a higher-priority muscle when earlier work competes with it', () => {
+    const result = evaluateWorkout(plan(['cable-curl', 'lat-pulldown']), exercises, undefined, { goals: [], priorities: ['Lats'] })
+    expect(result.findings.some((item) => item.category === 'ordering' && item.title.includes('fresher priority work'))).toBe(true)
+  })
 })

@@ -499,6 +499,37 @@ Example:
 
 Bobby uses these to influence recommendations.
 
+### Ordered, partial muscle priorities
+
+Priority muscles are an ordered partial ranking: the first selected muscle is
+the highest priority, the second is next, and muscles not selected remain in
+an implicit lower-priority group. Users never need to rank every muscle.
+
+Goals can provide default priorities. For example, **Aesthetic physique**
+defaults to side delts, lats, upper chest, abs, biceps, rear delts, and mid
+back. Explicit user priorities always lead this list in their selected order;
+remaining non-duplicated defaults fill in the rest.
+
+The resolved priority order is shared by plan, split, and workout evaluation.
+It guides—not overrides—recovery, available training days, working volume, and
+session constraints:
+
+* Higher priorities generally receive more practical direct exposures and a
+  larger share of productive direct volume.
+* The highest priority can target about three weekly opportunities when the
+  split supports it; lower priorities commonly target fewer. These are bounded
+  opportunities, not universal frequency requirements.
+* Splits are evaluated first for whether their frequency and direct volume
+  express the priority order. Bobby only suggests redistribution when the
+  mismatch is material.
+* Within a workout, a priority muscle's main productive work should generally
+  receive fresher placement before lower-priority competing work when safety,
+  technique, compounds, supersets, and fatigue management allow.
+
+Warm-up, drop, and failure sets are not substituted for productive direct
+working sets in this priority logic. Priority never overrides recovery or turns
+one poor session into a programming change.
+
 ---
 
 # 18. Future Natural-Language Goals
@@ -1455,7 +1486,9 @@ Integrate periodic strength tests into relevant workouts.
 
 ### Phase 13 — Split evaluation
 
-Allow Bobby to eventually question whether the user's split is working.
+Evaluate whether the split expresses the resolved goal and muscle-priority
+order through practical direct frequency, volume distribution, recovery, and
+fresh work. Suggest redistribution only when a material mismatch is present.
 
 ### Phase 14 — Analytics
 

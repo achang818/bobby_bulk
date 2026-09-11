@@ -9,6 +9,7 @@ import { classifyFatigue } from "./domain/states";
 import { calculateExerciseFeatures, comparePlannedVsActual } from "./domain/features";
 import { evaluateWorkout } from "./domain/workout-evaluator";
 import { evaluateSplit } from "./domain/split-evaluator";
+import { resolveMusclePriorities } from "./domain/muscle-priorities";
 import { loadLocalFileSnapshot, restoreBrowserData, saveLocalFileSnapshot } from "./domain/local-file-sync";
  import { clearActiveWorkoutSession, loadActiveWorkoutSession, loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, persistWorkouts, saveActiveWorkoutSession, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
@@ -40,6 +41,7 @@ function App() {
     const [activePlan, setActivePlan] = useState<WorkoutTemplate>(() => loadPlans()[0] ?? emptyPlan);
     const [plans, setPlans] = useState<WorkoutTemplate[]>(() => loadPlans());
     const [preferences, setPreferences] = useState<UserPreferences>(() => loadPreferences());
+    const resolvedMusclePriorities = useMemo(() => resolveMusclePriorities(preferences), [preferences]);
     const [gyms, setGyms] = useState<Gym[]>(() => {
         const saved = loadGyms();
         return saved.length > 0 ? saved : [defaultGym];
@@ -100,7 +102,7 @@ function App() {
     const activePlanExerciseIds = planExerciseIds(activePlan);
     const goalCriticalExerciseIds = activePlanExerciseIds.filter((id) => {
         const exercise = exercises.find((item) => item.id === id);
-        return exercise?.primaryMuscles.some((muscle) => preferences.priorities.some((priority) => priority.toLowerCase() === muscle.toLowerCase())) ?? false;
+        return exercise?.primaryMuscles.some((muscle) => resolvedMusclePriorities.rankOf(muscle) !== undefined) ?? false;
     });
     const planRecommendations = useMemo(() => [...evaluatePlan(activePlan, exercises, workoutsInCurrentUnit, preferences, undefined, currentGym.availableLoads, recommendationDecisions), ...adaptWorkout(activePlan, exercises, todaysContext, preferences), ...adaptWorkoutForTime(activePlan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds)].sort((a, b) => b.score - a.score), [activePlan, currentGym.availableLoads, goalCriticalExerciseIds, preferences, recommendationDecisions, todaysContext, workoutsInCurrentUnit]);
     const sessionRecommendations = useMemo(() => planRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), [planRecommendations, recommendationDecisions]);
@@ -178,7 +180,7 @@ function App() {
         }
         const planGoalCriticalIds = planExerciseIds(plan).filter((id) => {
             const exercise = exercises.find((item) => item.id === id);
-            return exercise?.primaryMuscles.some((muscle) => preferences.priorities.some((priority) => priority.toLowerCase() === muscle.toLowerCase())) ?? false;
+            return exercise?.primaryMuscles.some((muscle) => resolvedMusclePriorities.rankOf(muscle) !== undefined) ?? false;
         });
         const contextRecommendations = adaptWorkout(plan, exercises, todaysContext, preferences);
         const shortenedExerciseIds = planExerciseIds(plan).map((id) => contextRecommendations.find((item) => item.type === "REPLACE" && item.exerciseId === id)?.alternativeExerciseId ?? id).filter((id) => !adaptWorkoutForTime(plan, exercises, todaysContext.availableMinutes, planGoalCriticalIds).some((item) => item.type === "REMOVE" && item.exerciseId === id));
@@ -281,7 +283,7 @@ function EvaluatedTodayView({ plan, exerciseIds, setTargets, recommendations, de
     onDecision: (recommendation: PlanRecommendation, decision: "accepted" | "rejected" | "dismissed") => void;
 }) {
     const lastWorkout = [...workouts].sort((a, b) => b.date.localeCompare(a.date))[0];
-    const workoutHealth = evaluateWorkout(plan, exercises, todaysContext);
+    const workoutHealth = evaluateWorkout(plan, exercises, todaysContext, loadPreferences());
     const changes = recommendations.filter((recommendation) => recommendation.type !== "KEEP").slice(0, 4);
     useEffect(() => {
         document.querySelectorAll(".fatigue-indicator").forEach((element) => { element.textContent = element.textContent?.replace("Fatigue", "Recent workload") ?? "Recent workload"; });
@@ -328,8 +330,8 @@ function GoalsForm({ preferences, onSave, }: {
 }) {
     const [goals, setGoals] = useState<TrainingGoal[]>(preferences.goals);
     const [priorities, setPriorities] = useState(preferences.priorities);
-    const goalOptions: TrainingGoal[] = ["Build muscle", "Get stronger", "Improve athletic performance", "Improve a specific skill", "General fitness",];
-    const priorityOptions = ["Chest", "Upper chest", "Back", "Shoulders", "Arms", "Quads", "Hamstrings", "Glutes", "Side delts",];
+    const goalOptions: TrainingGoal[] = ["Build muscle", "Get stronger", "Improve athletic performance", "Improve a specific skill", "General fitness", "Aesthetic physique",];
+    const priorityOptions = ["Abs", "Upper chest", "Lats", "Side delts", "Biceps", "Rear delts", "Mid back", "Chest", "Quads", "Hamstrings", "Glutes",];
     function toggle<T>(items: T[], item: T) {
         return items.includes(item) ? items.filter((value) => value !== item) : [...items, item];
     }
@@ -601,7 +603,7 @@ function PlansView({ plans, onSave, onStart, onDelete, }: {
     }
     const emptyWorkoutPlan: WorkoutTemplate = { ...emptyPlan, id: "empty-workout", name: "Empty workout", description: "Log any exercises you choose without changing a saved plan.", focus: "Manual logging" };
     const allPlans = [emptyWorkoutPlan, ...plans, ...workoutTemplates.filter((template) => !plans.some((plan) => plan.id === template.id)),];
-    const splitEvaluation = useMemo(() => evaluateSplit({ id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) }, plans, exercises), [plans]);
+    const splitEvaluation = useMemo(() => evaluateSplit({ id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) }, plans, exercises, loadPreferences()), [plans]);
     useEffect(() => {
         const container = document.querySelector(".saved-plans");
         if (!container)

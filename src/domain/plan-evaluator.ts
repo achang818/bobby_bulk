@@ -2,6 +2,7 @@ import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { recommendNext } from './progression'
 import { buildTrace } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
+import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
 import type { AvailableLoad, Exercise, PlanRecommendation, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
 
@@ -14,11 +15,12 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     return exercise ? [{ exercise, planned }] : []
   })
   const otherPlanMuscles = new Set(planExercises.flatMap(({ exercise }) => exercise.primaryMuscles.map((muscle) => muscle.toLowerCase())))
+  const priorityProfile = resolveMusclePriorities(preferences)
 
   for (const { exercise, planned } of planExercises) {
     const features = calculateExerciseFeatures(exercise, history, asOf)
     const progression = recommendNext(exercise, planned, history, availableLoads)
-    const goalAligned = preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number]))
+    const goalAligned = preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))
     const preferenceState = classifyPreference(exercise.id, preferences, decisions)
     if (features.sessionsPerformed > 0 && progression.action !== 'start-here') {
       const trace = buildTrace('double-progression')
@@ -41,11 +43,11 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     }
   }
 
-  for (const priority of preferences.priorities) {
+  for (const [priorityRank, priority] of priorityProfile.orderedMuscles.entries()) {
     const muscle = calculateMuscleFeatures(priority, exercises, history, asOf)
     const represented = planExercises.some(({ exercise }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === priority.toLowerCase()))
     const normalizedPriority = priority.toLowerCase()
-    const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'disliked' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number]))))
+    const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'disliked' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))))
     // Sparse plans have too little existing context to constrain a legitimate priority add.
     const shouldCheckCoherence = plannedExercises.length >= 2 && otherPlanMuscles.size > 0
     const coherentCandidates = shouldCheckCoherence
@@ -55,10 +57,11 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     const candidate = coherentCandidates[0]
     const coherenceMattered = shouldCheckCoherence && coherentCandidates.length < priorityCandidates.length
     const lowVolume = muscle.volumeState === 'low recent volume'
-    const lowFrequency = muscle.frequency14Days === 1
+    const desiredFrequency = priorityProfile.desiredFrequency(priority, 3)
+    const lowFrequency = muscle.frequency14Days > 0 && muscle.frequency14Days < desiredFrequency * 2
     if (!represented && candidate && (lowVolume || lowFrequency)) {
       const trace = buildTrace(lowVolume ? 'add-for-priority-volume' : 'add-for-priority-frequency')
-      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: muscle.rolling28DaySets === 0 ? 5 : 4, reasons: [`${priority} is one of your current priorities.`, trace.principleDescription, ...(lowVolume && coherenceMattered ? ["This exercise fits your plan's existing muscle groups."] : [])], trace })
+      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: muscle.rolling28DaySets === 0 ? 5 : Math.max(3, 5 - Math.min(priorityRank, 2)), reasons: [`${priority} is priority #${priorityRank + 1}.`, trace.principleDescription, ...(lowFrequency ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : []), ...(lowVolume && coherenceMattered ? ["This exercise fits your plan's existing muscle groups."] : [])], trace })
     }
   }
   return recommendations.sort((a, b) => b.score - a.score)

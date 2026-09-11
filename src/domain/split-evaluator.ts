@@ -1,5 +1,6 @@
 import { evaluateWorkout } from './workout-evaluator'
 import { plannedExercisesFor } from './workout-session'
+import { resolveMusclePriorities } from './muscle-priorities'
 import type { Exercise, Split, SplitAssessment, SplitEvaluation, SplitFinding, UserPreferences, WorkoutEvaluation, WorkoutTemplate } from './models'
 
 type EvaluatedWorkout = { workout: WorkoutTemplate; evaluation: WorkoutEvaluation; splitIndex: number }
@@ -22,7 +23,7 @@ export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercis
   const findings: SplitFinding[] = []
   if (missing.length) findings.push(finding('structure', 'warning', 'Missing workout references', 'One or more workouts referenced by this split could not be found. The remaining assessment uses the workouts that are available.', missing))
   if (!entries.length) return { splitId: split.id, workouts: [], muscleSummary: [], findings, overallAssessment: insufficientAssessment(preferences) }
-  findings.push(...recoveryFindings(muscles), ...distributionFindings(muscleSummary), ...redundancyFindings(entries, exercises), ...complementarityFindings(entries), ...priorityFindings(muscleSummary, preferences))
+  findings.push(...recoveryFindings(muscles), ...distributionFindings(muscleSummary), ...redundancyFindings(entries, exercises), ...complementarityFindings(entries), ...priorityFindings(entries, muscleSummary, preferences))
   return { splitId: split.id, workouts: entries.map((entry) => entry.evaluation), muscleSummary, findings, overallAssessment: assessmentFor(entries, muscleSummary, findings, preferences) }
 }
 
@@ -77,9 +78,25 @@ function complementarityFindings(entries: EvaluatedWorkout[]): SplitFinding[] {
   return findings
 }
 
-function priorityFindings(summary: SplitEvaluation['muscleSummary'], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitFinding[] {
-  if (!preferences?.priorities.length) return []
-  return preferences.priorities.filter((priority) => !summary.some((item) => item.muscle.toLowerCase() === priority.toLowerCase())).map((priority) => finding('goal-alignment', 'info', `${priority} has no direct split work`, `No workout in this split has direct planned work for your ${priority} priority. Secondary involvement is not counted as direct volume.`, []))
+function priorityFindings(entries: EvaluatedWorkout[], summary: SplitEvaluation['muscleSummary'], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitFinding[] {
+  const profile = resolveMusclePriorities(preferences)
+  if (!profile.orderedMuscles.length) return []
+  const findings: SplitFinding[] = []
+  const prioritySummary = profile.orderedMuscles.map((muscle, rank) => ({ muscle, rank, summary: summary.find((item) => item.muscle.toLowerCase() === muscle.toLowerCase()) }))
+  for (const item of prioritySummary) {
+    if (!item.summary) {
+      findings.push(finding('goal-alignment', item.rank < 3 ? 'warning' : 'info', `${item.muscle} has no direct split work`, `No workout in this split has direct planned work for priority #${item.rank + 1} ${item.muscle}. Secondary involvement is not counted as direct volume.`, []))
+      continue
+    }
+    const desired = profile.desiredFrequency(item.muscle, entries.length)
+    if (entries.length >= desired && item.summary.workoutCount < desired) findings.push(finding('frequency', item.rank < 3 ? 'warning' : 'info', `${item.muscle} is underexposed for its priority`, `Priority #${item.rank + 1} ${item.muscle} has ${item.summary.workoutCount} direct exposure${item.summary.workoutCount === 1 ? '' : 's'} across this split; ${desired} is the practical target given its ${entries.length} workout opportunities.`, [`${item.summary.plannedWorkingSets} direct planned sets`]))
+  }
+  for (let rank = 0; rank < prioritySummary.length - 1; rank += 1) {
+    const higher = prioritySummary[rank]
+    const lower = prioritySummary.slice(rank + 1).find((item) => item.summary && higher.summary && (item.summary.workoutCount > higher.summary.workoutCount || item.summary.plannedWorkingSets * profile.volumeWeight(item.muscle) > higher.summary.plannedWorkingSets * profile.volumeWeight(higher.muscle)))
+    if (higher.summary && lower?.summary) findings.push(finding('goal-alignment', 'info', `${higher.muscle} receives less split emphasis than ${lower.muscle}`, `${higher.muscle} is priority #${higher.rank + 1}, but ${lower.muscle} has more direct frequency or volume. Consider redistributing existing split work before adding unlimited sets.`, [`${higher.muscle}: ${higher.summary.workoutCount} exposures / ${higher.summary.plannedWorkingSets} sets`, `${lower.muscle}: ${lower.summary.workoutCount} exposures / ${lower.summary.plannedWorkingSets} sets`]))
+  }
+  return findings
 }
 
 function assessmentFor(entries: EvaluatedWorkout[], summary: SplitEvaluation['muscleSummary'], findings: SplitFinding[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitAssessment {
@@ -90,9 +107,9 @@ function assessmentFor(entries: EvaluatedWorkout[], summary: SplitEvaluation['mu
     recovery: findings.some((item) => item.category === 'recovery') ? 'potential overlap' : entries.length > 1 ? 'spaced' : 'insufficient information',
     redundancy: findings.some((item) => item.category === 'redundancy') ? 'repeated stimulus' : entries.length > 1 ? 'varied' : 'insufficient information',
     complementarity: findings.some((item) => item.category === 'complementarity') ? 'substantially overlapping' : entries.length > 1 ? 'complementary' : 'insufficient information',
-    goalAlignment: preferences?.priorities.length ? findings.some((item) => item.category === 'goal-alignment') ? 'limited' : 'aligned' : 'not assessed',
+    goalAlignment: resolveMusclePriorities(preferences).orderedMuscles.length ? findings.some((item) => item.category === 'goal-alignment' || item.category === 'frequency') ? 'limited' : 'aligned' : 'not assessed',
   }
 }
 
-function insufficientAssessment(preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitAssessment { return { distribution: 'insufficient information', recovery: 'insufficient information', redundancy: 'insufficient information', complementarity: 'insufficient information', goalAlignment: preferences?.priorities.length ? 'limited' : 'not assessed' } }
+function insufficientAssessment(preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitAssessment { return { distribution: 'insufficient information', recovery: 'insufficient information', redundancy: 'insufficient information', complementarity: 'insufficient information', goalAlignment: resolveMusclePriorities(preferences).orderedMuscles.length ? 'limited' : 'not assessed' } }
 function finding(category: SplitFinding['category'], severity: SplitFinding['severity'], title: string, description: string, evidence: string[]): SplitFinding { return { category, severity, title, description, evidence } }
