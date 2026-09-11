@@ -68,7 +68,10 @@ describe('planned workouts and sessions', () => {
       { ...createPlannedExercise(lateralRaise.id, 1, lateralRaise), sets: 2 },
     ] }, exercises)
     expect(estimateTypicalDuration(plan, exercises)).toBe(22)
-    const modifications = adaptWorkoutForTime(plan, exercises, 16)
+    const modifications = adaptWorkoutForTime(plan, exercises, 16).map((candidate) => ({
+      id: candidate.id, type: candidate.type, priority: candidate.score, target: { kind: 'exercise' as const, exerciseId: candidate.exerciseId },
+      change: { kind: 'modify' as const, exerciseId: candidate.exerciseId, changes: { sets: candidate.modifiedSets } }, reason: candidate.reasons[0]!, trace: candidate.trace,
+    }))
     const resolved = resolveWorkoutForToday(plan, modifications, exercises)
     const session = createWorkoutSession(resolved)
 
@@ -78,10 +81,10 @@ describe('planned workouts and sessions', () => {
   it('applies modify, replace, add, and remove to structured slots and keeps the ID projection synchronized', () => {
     const plan = normalizeWorkoutTemplate({ id: 'actions', name: 'Actions', description: '', focus: '', exerciseIds: ['a', 'b'] })
     const trace = { ruleId: 'test', principleId: 'test', principleDescription: 'test', evidenceLevel: 'C' as const, source: { name: 'test' } }
-    const modify = applyAcceptedRecommendation(plan, { id: 'modify', type: 'MODIFY', exerciseId: 'a', modifiedSets: 2, score: 1, reasons: [], trace })
-    const replace = applyAcceptedRecommendation(modify, { id: 'replace', type: 'REPLACE', exerciseId: 'a', alternativeExerciseId: 'c', score: 1, reasons: [], trace })
-    const added = applyAcceptedRecommendation(replace, { id: 'add', type: 'ADD', exerciseId: 'd', score: 1, reasons: [], trace })
-    const removed = applyAcceptedRecommendation(added, { id: 'remove', type: 'REMOVE', exerciseId: 'b', score: 1, reasons: [], trace })
+    const modify = applyAcceptedRecommendation(plan, { id: 'modify', type: 'MODIFY', priority: 1, target: { kind: 'exercise', exerciseId: 'a' }, change: { kind: 'modify', exerciseId: 'a', changes: { sets: 2 } }, reason: 'test', trace })
+    const replace = applyAcceptedRecommendation(modify, { id: 'replace', type: 'REPLACE', priority: 1, target: { kind: 'exercise', exerciseId: 'a' }, change: { kind: 'replace', fromExerciseId: 'a', toExerciseId: 'c' }, reason: 'test', trace })
+    const added = applyAcceptedRecommendation(replace, { id: 'add', type: 'ADD', priority: 1, target: { kind: 'exercise', exerciseId: 'd' }, change: { kind: 'add', exerciseId: 'd', sets: 3, repRange: { min: 8, max: 12 } }, reason: 'test', trace })
+    const removed = applyAcceptedRecommendation(added, { id: 'remove', type: 'REMOVE', priority: 1, target: { kind: 'exercise', exerciseId: 'b' }, change: { kind: 'remove', exerciseId: 'b' }, reason: 'test', trace })
 
     expect(removed.plannedExercises?.[0]).toMatchObject({ exerciseId: 'c', sets: 2, order: 0 })
     expect(removed.exerciseIds).toEqual(planExerciseIds(removed))

@@ -1,10 +1,21 @@
 import { describe, expect, it } from 'vitest'
 import { applyAcceptedRecommendation } from '../domain/plan-actions'
-import type { PlanRecommendation, WorkoutTemplate } from '../domain/models'
+import type { Recommendation, WorkoutTemplate } from '../domain/models'
 
 const plan: WorkoutTemplate = { id: 'plan', name: 'Plan', description: 'test', focus: 'test', exerciseIds: ['a', 'b'] }
-const recommendation = (type: PlanRecommendation['type'], exerciseId: string, alternativeExerciseId?: string): PlanRecommendation => ({
-  id: `${type}-${exerciseId}`, type, exerciseId, alternativeExerciseId, score: 1, reasons: [], trace: { ruleId: 'test' as never, principleId: 'test', principleDescription: 'test', evidenceLevel: 'D', source: { name: 'test' } },
+const recommendation = (type: Recommendation['type'], exerciseId: string, alternativeExerciseId?: string): Recommendation => ({
+  id: `${type}-${exerciseId}`,
+  type,
+  priority: 1,
+  target: { kind: 'exercise', exerciseId },
+  change: type === 'REPLACE' ? { kind: 'replace', fromExerciseId: exerciseId, toExerciseId: alternativeExerciseId! }
+    : type === 'ADD' ? { kind: 'add', exerciseId, sets: 3, repRange: { min: 8, max: 12 } }
+      : type === 'REMOVE' ? { kind: 'remove', exerciseId }
+        : type === 'MODIFY' ? { kind: 'modify', exerciseId, changes: { sets: 2 } }
+          : type === 'PROGRESSION' ? { kind: 'progression', repRange: { min: 8, max: 12 } }
+            : { kind: 'keep' },
+  reason: 'test',
+  trace: { ruleId: 'test' as never, principleId: 'test', principleDescription: 'test', evidenceLevel: 'D', source: { name: 'test' } },
 })
 
 describe('applyAcceptedRecommendation', () => {
@@ -21,7 +32,7 @@ describe('applyAcceptedRecommendation', () => {
     expect(applyAcceptedRecommendation(plan, recommendation('REMOVE', 'a')).exerciseIds).toEqual(['b'])
   })
 
-  it.each(['PROGRESSION', 'KEEP', 'MODIFY'] as const)('does not mutate a plan for %s', (type) => {
+  it.each(['PROGRESSION', 'KEEP'] as const)('does not mutate a plan for %s', (type) => {
     expect(applyAcceptedRecommendation(plan, recommendation(type, 'a')).exerciseIds).toEqual(['a', 'b'])
   })
 })

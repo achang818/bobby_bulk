@@ -1,4 +1,4 @@
-import type { PlanRecommendation, RecommendationTrace } from './models'
+import type { RecommendationCandidate, Recommendation, RecommendationTrace } from './models'
 import { findPrinciple } from './knowledge-base'
 
 export const decisionRules = {
@@ -27,10 +27,19 @@ export function buildTrace(ruleId: DecisionRuleId): RecommendationTrace {
 }
 
 /** Recommendation-type priority only; never an exercise-quality score. */
-export function compareRecommendations(left: PlanRecommendation, right: PlanRecommendation, exerciseOrder: ReadonlyMap<string, number> = new Map()) {
+export function compareRecommendations(left: RecommendationCandidate, right: RecommendationCandidate, exerciseOrder: ReadonlyMap<string, number> = new Map()) {
   const priority = right.score - left.score
   if (priority) return priority
   const leftOrder = exerciseOrder.get(left.exerciseId) ?? Number.MAX_SAFE_INTEGER
   const rightOrder = exerciseOrder.get(right.exerciseId) ?? Number.MAX_SAFE_INTEGER
+  return leftOrder - rightOrder || left.id.localeCompare(right.id)
+}
+
+/** Final-output ordering: priority, plan order where applicable, then stable ID. */
+export function compareFinalRecommendations(left: Recommendation, right: Recommendation, exerciseOrder: ReadonlyMap<string, number> = new Map()) {
+  const priority = right.priority - left.priority
+  if (priority) return priority
+  const leftOrder = left.target.kind === 'exercise' ? exerciseOrder.get(left.target.exerciseId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
+  const rightOrder = right.target.kind === 'exercise' ? exerciseOrder.get(right.target.exerciseId) ?? Number.MAX_SAFE_INTEGER : Number.MAX_SAFE_INTEGER
   return leftOrder - rightOrder || left.id.localeCompare(right.id)
 }

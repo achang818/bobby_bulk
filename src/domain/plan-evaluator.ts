@@ -5,7 +5,7 @@ import { buildTrace, compareRecommendations } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
 import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
-import type { AvailableLoad, Exercise, PlanRecommendation, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
+import type { AvailableLoad, Exercise, RecommendationCandidate, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
 
 // A single workout plan has no weekly split/calendar context. Three is a
 // conservative opportunity ceiling for detecting sparse recent exposure; the
@@ -14,15 +14,14 @@ export const PLAN_FREQUENCY_OPPORTUNITIES = 3
 
 type PriorityAddReason = 'missing-slot' | 'low-volume' | 'low-frequency'
 
-export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): PlanRecommendation[] {
-  const recommendations: PlanRecommendation[] = []
+export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): RecommendationCandidate[] {
+  const recommendations: RecommendationCandidate[] = []
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const planExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
   const planExercises = plannedExercises.flatMap((planned) => {
     const exercise = exercises.find((item) => item.id === planned.exerciseId)
     return exercise ? [{ exercise, planned }] : []
   })
-  const otherPlanMuscles = new Set(planExercises.flatMap(({ exercise }) => exercise.primaryMuscles.map((muscle) => muscle.toLowerCase())))
   const exerciseOrder = new Map(plannedExercises.map((planned, index) => [planned.exerciseId, index]))
   const priorityProfile = resolveMusclePriorities(preferences)
   // One candidate can directly train more than one priority muscle. The first
@@ -70,14 +69,10 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     const represented = planExercises.some(({ exercise }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === priority.toLowerCase()))
     const normalizedPriority = priority.toLowerCase()
     const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'excluded' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))))
-    // Sparse plans have too little existing context to constrain a legitimate priority add.
-    const shouldCheckCoherence = plannedExercises.length >= 2 && otherPlanMuscles.size > 0
-    const coherentCandidates = shouldCheckCoherence
-      // Secondary muscles can establish session fit, but never count as direct volume.
-      ? priorityCandidates.filter((candidate) => [...candidate.primaryMuscles.filter((muscleName) => muscleName.toLowerCase() !== normalizedPriority), ...candidate.secondaryMuscles].some((muscleName) => otherPlanMuscles.has(muscleName.toLowerCase())))
-      : priorityCandidates
-    const candidate = coherentCandidates[0]
-    const coherenceMattered = shouldCheckCoherence && coherentCandidates.length < priorityCandidates.length
+    // A priority add is valid on its own merits. Session "coherence" is not a
+    // hard constraint: it must never silently suppress an otherwise valid
+    // priority recommendation or limit how many can coexist.
+    const candidate = priorityCandidates[0]
     const desiredFrequency = priorityProfile.desiredFrequency(priority, PLAN_FREQUENCY_OPPORTUNITIES)
     const addReason = priorityAddReason(muscle, desiredFrequency)
     if (!represented && candidate && addReason && !priorityAddExerciseIds.has(candidate.id)) {
@@ -86,7 +81,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
       // direct work, while the explicit reason below makes clear this is not
       // inferred historical volume or performance evidence.
       const trace = buildTrace(addReason === 'low-frequency' ? 'add-for-priority-frequency' : 'add-for-priority-volume')
-      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: addReason === 'missing-slot' ? Math.max(4, 5 - Math.min(priorityRank, 2)) : Math.max(3, 5 - Math.min(priorityRank, 2)), reasons: [`${priority} is priority #${priorityRank + 1}.`, ...(addReason === 'missing-slot' ? ['No direct working-set history or planned slot exists for this priority yet.'] : []), trace.principleDescription, ...(addReason === 'low-frequency' ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : []), ...(addReason === 'low-volume' && coherenceMattered ? ["This exercise fits your plan's existing muscle groups."] : [])], trace })
+      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: addReason === 'missing-slot' ? Math.max(4, 5 - Math.min(priorityRank, 2)) : Math.max(3, 5 - Math.min(priorityRank, 2)), reasons: [`${priority} is priority #${priorityRank + 1}.`, ...(addReason === 'missing-slot' ? ['No direct working-set history or planned slot exists for this priority yet.'] : []), trace.principleDescription, ...(addReason === 'low-frequency' ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : [])], trace })
       priorityAddExerciseIds.add(candidate.id)
     }
   }

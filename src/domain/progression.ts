@@ -1,9 +1,9 @@
 import { createPlannedExercise } from './workout-session'
-import type { AvailableLoad, Exercise, LoggedSet, PlannedExercise, Recommendation, Workout } from './models'
+import type { AvailableLoad, Exercise, LoggedSet, PlannedExercise, ProgressionRecommendation, Workout } from './models'
 
-export function recommendNext(exercise: Exercise, history: Workout[], availableLoads?: AvailableLoad[]): Recommendation
-export function recommendNext(exercise: Exercise, plannedExercise: PlannedExercise, history: Workout[], availableLoads?: AvailableLoad[]): Recommendation
-export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExercise | Workout[], historyOrLoads?: Workout[] | AvailableLoad[], maybeLoads?: AvailableLoad[]): Recommendation {
+export function recommendNext(exercise: Exercise, history: Workout[], availableLoads?: AvailableLoad[]): ProgressionRecommendation
+export function recommendNext(exercise: Exercise, plannedExercise: PlannedExercise, history: Workout[], availableLoads?: AvailableLoad[]): ProgressionRecommendation
+export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExercise | Workout[], historyOrLoads?: Workout[] | AvailableLoad[], maybeLoads?: AvailableLoad[]): ProgressionRecommendation {
   const planned = Array.isArray(plannedOrHistory) ? createPlannedExercise(exercise.id, 0, exercise) : plannedOrHistory
   const history = Array.isArray(plannedOrHistory) ? plannedOrHistory : historyOrLoads as Workout[]
   const availableLoads = Array.isArray(plannedOrHistory) ? historyOrLoads as AvailableLoad[] | undefined : maybeLoads
@@ -49,7 +49,7 @@ export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExerc
   ])
 }
 
-function recommendation(exercise: Exercise, planned: PlannedExercise, weight: number, action: Recommendation['action'], confidence: NonNullable<Recommendation['confidence']>, reasons: string[]): Recommendation {
+function recommendation(exercise: Exercise, planned: PlannedExercise, weight: number, action: ProgressionRecommendation['action'], confidence: NonNullable<ProgressionRecommendation['confidence']>, reasons: string[]): ProgressionRecommendation {
   return { exercise, weight, sets: planned.sets, repRange: planned.repRange, action, confidence, reasons }
 }
 

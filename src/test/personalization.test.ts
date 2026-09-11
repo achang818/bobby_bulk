@@ -169,12 +169,22 @@ describe('plan evaluation', () => {
     expect(result.some((item) => item.type === 'REMOVE')).toBe(false)
   })
 
-  it('does not add a push exercise to a pull-style plan for an unrelated priority', () => {
+  it('does not let plan coherence suppress an otherwise valid priority add', () => {
     const pullPlan: WorkoutPlan = { id: 'pull', name: 'Pull', description: 'test', focus: 'Back', exerciseIds: ['cable-row', 'face-pull'] }
     const history = [workout('a', '2026-09-01', bench.id, 8)]
     const result = evaluatePlan(pullPlan, exercises, history, { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Upper chest'] }, '2026-09-09')
 
-    expect(result.filter((item) => item.type === 'ADD')).toEqual([])
+    expect(result.find((item) => item.type === 'ADD')?.exerciseId).toBe(bench.id)
+  })
+
+  it('keeps remaining priority suggestions available while building an empty workout', () => {
+    // These are two previously accepted, unrelated priority additions. A manual
+    // empty workout should still offer direct lat work instead of treating those
+    // first choices as a focused session that excludes it.
+    const buildingWorkout: WorkoutPlan = { id: 'empty-workout', name: 'Empty workout', description: '', focus: 'Manual logging', exerciseIds: [cableCrunch.id, bench.id] }
+    const result = evaluatePlan(buildingWorkout, exercises, [], { ...defaultPreferences, goals: ['Build muscle'], priorities: ['Abs', 'Upper chest', 'Lats'] }, '2026-09-09')
+
+    expect(result.some((item) => item.type === 'ADD' && exercises.find((exercise) => exercise.id === item.exerciseId)?.primaryMuscles.includes('Lats'))).toBe(true)
   })
 
   it('adds a coherent upper-chest exercise to a push-style plan', () => {

@@ -1,6 +1,7 @@
 import { exercises } from './exercises'
 import { normalizeWorkoutSession, normalizeWorkoutTemplate } from './workout-session'
-import type { Gym, PlanRecommendation, Program, RecommendationDecision, RecommendationDecisionType, Split, TodaysContext, UserPreferences, Workout, WorkoutSession, WorkoutTemplate } from './models'
+import type { Gym, Program, Recommendation, RecommendationDecision, RecommendationDecisionType, Split, TodaysContext, UserPreferences, Workout, WorkoutSession, WorkoutTemplate } from './models'
+import { recommendationExerciseId } from './recommendations'
 import { defaultPreferences } from './preferences'
 
 const STORAGE_KEY = 'bobby-bulk-workouts'
@@ -194,13 +195,14 @@ export function saveTodaysContext(context: TodaysContext): TodaysContext {
   return context
 }
 
-export function saveRecommendationDecision(recommendation: PlanRecommendation, decision: RecommendationDecisionType): RecommendationDecision[] {
+export function saveRecommendationDecision(recommendation: Recommendation, decision: RecommendationDecisionType): RecommendationDecision[] {
   const decisions = [...loadRecommendationDecisions(), {
     id: crypto.randomUUID(),
     recommendationId: recommendation.id,
     recommendationType: recommendation.type,
-    exerciseId: recommendation.exerciseId,
+    exerciseId: recommendationExerciseId(recommendation) ?? '',
     decision,
+    timestamp: new Date().toISOString(),
   }]
   localStorage.setItem(DECISIONS_KEY, JSON.stringify(decisions))
   return decisions

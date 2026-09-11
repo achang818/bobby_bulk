@@ -342,14 +342,18 @@ export interface RecommendationTrace {
   source: Source
 }
 
-export interface PlanRecommendation {
+/**
+ * Intermediate output from one decision rule. Only `recommendations.ts`
+ * converts these into the stable, user-facing `Recommendation` contract.
+ */
+export interface RecommendationCandidate {
   id: string
   type: PlanRecommendationType
   exerciseId: string
   alternativeExerciseId?: string
   score: number
   reasons: string[]
-  progression?: Recommendation
+  progression?: ProgressionRecommendation
   modifiedSets?: number
   trace: RecommendationTrace
 }
@@ -362,9 +366,37 @@ export interface RecommendationDecision {
   recommendationType: PlanRecommendationType
   exerciseId: string
   decision: RecommendationDecisionType
+  /** Present on newly recorded decisions; omitted only by legacy local data. */
+  timestamp?: string
 }
 
+export type RecommendationTarget =
+  | { kind: 'exercise'; exerciseId: string; plannedExerciseId?: string }
+  | { kind: 'workout'; workoutId: string }
+  | { kind: 'muscle'; muscle: string }
+
+export type RecommendationChange =
+  | { kind: 'keep' }
+  | { kind: 'progression'; currentLoad?: number; recommendedLoad?: number; repRange: { min: number; max: number } }
+  | { kind: 'add'; exerciseId: string; sets: number; repRange: { min: number; max: number } }
+  | { kind: 'replace'; fromExerciseId: string; toExerciseId: string }
+  | { kind: 'remove'; exerciseId: string }
+  | { kind: 'modify'; exerciseId: string; changes: { sets?: number; repRange?: { min: number; max: number } } }
+
+/** Final deterministic output of Bobby's recommendation pipeline. */
 export interface Recommendation {
+  id: string
+  type: PlanRecommendationType
+  /** Ordering priority only; it is not a quality, utility, or probability score. */
+  priority: number
+  target: RecommendationTarget
+  change: RecommendationChange
+  reason: string
+  trace: RecommendationTrace
+}
+
+/** Progression-rule evidence before it is composed into a final Recommendation. */
+export interface ProgressionRecommendation {
   exercise: Exercise
   weight: number
   sets: number

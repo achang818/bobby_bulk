@@ -1,23 +1,27 @@
-import type { PlanRecommendation, WorkoutTemplate } from './models'
+import type { Recommendation, WorkoutTemplate } from './models'
 import { createPlannedExercise, normalizeWorkoutTemplate, planExerciseIds, synchronizePlan } from './workout-session'
 
-export function applyAcceptedRecommendation(plan: WorkoutTemplate, recommendation: PlanRecommendation): WorkoutTemplate {
+export function applyAcceptedRecommendation(plan: WorkoutTemplate, recommendation: Recommendation): WorkoutTemplate {
   const normalizedPlan = normalizeWorkoutTemplate(plan)
   switch (recommendation.type) {
     case 'REPLACE':
-      return recommendation.alternativeExerciseId
-        ? synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === recommendation.exerciseId ? { ...exercise, exerciseId: recommendation.alternativeExerciseId as string } : exercise) })
-        : normalizedPlan
+      if (recommendation.change.kind !== 'replace') return normalizedPlan
+      { const change = recommendation.change
+        return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === change.fromExerciseId ? { ...exercise, exerciseId: change.toExerciseId } : exercise) }) }
     case 'ADD':
-      return planExerciseIds(normalizedPlan).includes(recommendation.exerciseId)
+      if (recommendation.change.kind !== 'add') return normalizedPlan
+      { const change = recommendation.change
+      return planExerciseIds(normalizedPlan).includes(change.exerciseId)
         ? normalizedPlan
-        : synchronizePlan({ ...normalizedPlan, plannedExercises: [...normalizedPlan.plannedExercises!, createPlannedExercise(recommendation.exerciseId, normalizedPlan.plannedExercises!.length)] })
+        : synchronizePlan({ ...normalizedPlan, plannedExercises: [...normalizedPlan.plannedExercises!, createPlannedExercise(change.exerciseId, normalizedPlan.plannedExercises!.length)] }) }
     case 'REMOVE':
-      return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.filter((exercise) => exercise.exerciseId !== recommendation.exerciseId).map((exercise, order) => ({ ...exercise, order })) })
+      if (recommendation.change.kind !== 'remove') return normalizedPlan
+      { const change = recommendation.change
+        return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.filter((exercise) => exercise.exerciseId !== change.exerciseId).map((exercise, order) => ({ ...exercise, order })) }) }
     case 'MODIFY':
-      return recommendation.modifiedSets === undefined
-        ? normalizedPlan
-        : synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === recommendation.exerciseId ? { ...exercise, sets: recommendation.modifiedSets as number } : exercise) })
+      if (recommendation.change.kind !== 'modify' || recommendation.change.changes.sets === undefined) return normalizedPlan
+      { const change = recommendation.change
+        return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === change.exerciseId ? { ...exercise, sets: change.changes.sets! } : exercise) }) }
     default:
       return normalizedPlan
   }

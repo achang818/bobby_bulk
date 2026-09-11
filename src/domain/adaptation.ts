@@ -3,7 +3,7 @@ import { equipmentTagFor } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
-import type { Exercise, ExerciseCandidate, PlanRecommendation, TodaysContext, UserPreferences, WorkoutPlan } from './models'
+import type { Exercise, ExerciseCandidate, RecommendationCandidate, TodaysContext, UserPreferences, WorkoutPlan } from './models'
 
 // The limit protects a familiar workout from unnecessary churn; it is contextual, not universal.
 export const MAX_CONTEXTUAL_SUBSTITUTIONS = 2
@@ -32,7 +32,7 @@ export function findContextualCandidates(exercise: Exercise, exercises: Exercise
   }).rankedCandidates
 }
 
-export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): PlanRecommendation[] {
+export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): RecommendationCandidate[] {
   const traveling = defaultGymId !== undefined && todaysContext.gymId !== defaultGymId
   const limit = traveling ? Number.POSITIVE_INFINITY : MAX_CONTEXTUAL_SUBSTITUTIONS
   let substitutions = 0
@@ -66,7 +66,7 @@ export function estimateTypicalDuration(plan: WorkoutPlan, exercises: Exercise[]
   return planExercises.reduce((minutes, planned) => minutes + planned.sets * MINUTES_PER_WORKING_SET, 0) + planExercises.length * MINUTES_PER_EXERCISE_TRANSITION
 }
 
-export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], availableMinutes: number | undefined, goalCriticalExerciseIds: string[] = []): PlanRecommendation[] {
+export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], availableMinutes: number | undefined, goalCriticalExerciseIds: string[] = []): RecommendationCandidate[] {
   if (availableMinutes === undefined) return []
   const typicalDuration = estimateTypicalDuration(plan, exercises)
   if (availableMinutes >= typicalDuration) return []
@@ -78,8 +78,8 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
   })
   const trace = buildTrace('adapt-available-time')
   const orderedExercises = [...planExercises].sort((a, b) => protectionScore(a.exercise, goalCritical) - protectionScore(b.exercise, goalCritical))
-  const modifications = new Map<string, PlanRecommendation>()
-  const removals: PlanRecommendation[] = []
+  const modifications = new Map<string, RecommendationCandidate>()
+  const removals: RecommendationCandidate[] = []
   let minutesToSave = typicalDuration - availableMinutes
 
   for (const { exercise, planned } of orderedExercises) {

@@ -1,4 +1,4 @@
-import type { Exercise, LoggedSet, PlanRecommendation, PlannedExercise, SetType, WorkoutSession, WorkoutTemplate } from './models'
+import type { Exercise, LoggedSet, Recommendation, PlannedExercise, SetType, WorkoutSession, WorkoutTemplate } from './models'
 
 const defaultRepRange = { min: 8, max: 12 }
 
@@ -18,12 +18,12 @@ export function synchronizePlan(plan: WorkoutTemplate, exercises: Exercise[] = [
   return { ...plan, plannedExercises, exerciseIds: plannedExercises.map((exercise) => exercise.exerciseId) }
 }
 
-export function resolveWorkoutForToday(plan: WorkoutTemplate, recommendations: PlanRecommendation[], exercises: Exercise[] = []): WorkoutTemplate {
+export function resolveWorkoutForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[] = []): WorkoutTemplate {
   const resolved = plannedExercisesFor(plan, exercises)
     .flatMap((planned) => {
-      const recommendation = recommendations.find((item) => item.exerciseId === planned.exerciseId && ['REPLACE', 'REMOVE', 'MODIFY'].includes(item.type))
+      const recommendation = recommendations.find((item) => item.target.kind === 'exercise' && item.target.exerciseId === planned.exerciseId && ['REPLACE', 'REMOVE', 'MODIFY'].includes(item.type))
       if (recommendation?.type === 'REMOVE') return []
-      return [{ ...planned, ...(recommendation?.type === 'REPLACE' && recommendation.alternativeExerciseId ? { exerciseId: recommendation.alternativeExerciseId } : {}), ...(recommendation?.type === 'MODIFY' && recommendation.modifiedSets !== undefined ? { sets: recommendation.modifiedSets } : {}) }]
+      return [{ ...planned, ...(recommendation?.change.kind === 'replace' ? { exerciseId: recommendation.change.toExerciseId } : {}), ...(recommendation?.change.kind === 'modify' && recommendation.change.changes.sets !== undefined ? { sets: recommendation.change.changes.sets } : {}) }]
     })
     .map((planned, order) => ({ ...planned, order }))
   return synchronizePlan({ ...plan, plannedExercises: resolved }, exercises)
