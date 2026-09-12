@@ -60,6 +60,7 @@ export function normalizeWorkoutTemplate(value: unknown, exercises: Exercise[] =
     plannedExercises,
     exerciseIds: plannedExercises.slice().sort((a, b) => a.order - b.order).map((item) => item.exerciseId),
     ...(raw.saved === undefined ? {} : { saved: raw.saved }),
+    ...(raw.planningAuthority === undefined ? {} : { planningAuthority: raw.planningAuthority }),
   }, exercises)
 }
 
@@ -73,6 +74,7 @@ export function createWorkoutSession(workout: WorkoutTemplate, plannedExercises 
     status: 'in-progress',
     startedAt: now,
     unit: undefined,
+    ...(workout.planningAuthority === undefined ? {} : { planningAuthority: workout.planningAuthority }),
     plannedExercises: plannedExercises.map((exercise) => ({ ...exercise })),
     sets: [],
   }
@@ -95,6 +97,7 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
     ...(raw.completedAt ? { completedAt: raw.completedAt } : raw.status === 'completed' || !raw.status ? { completedAt: `${date}T00:00:00.000Z` } : {}),
     ...(raw.notes ? { notes: raw.notes } : {}),
     ...(raw.unit ? { unit: raw.unit } : {}),
+    ...(raw.planningAuthority === undefined ? {} : { planningAuthority: raw.planningAuthority }),
     plannedExercises: Array.isArray(raw.plannedExercises) ? raw.plannedExercises.map((exercise, index) => ({
       ...createPlannedExercise(exercise.exerciseId ?? '', exercise.order ?? index), ...exercise, order: exercise.order ?? index, setType: exercise.setType ?? 'working',
     })).filter((exercise) => exercise.exerciseId) : [],

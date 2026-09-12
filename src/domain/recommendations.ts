@@ -4,7 +4,7 @@ import { evaluatePlan } from './plan-evaluator'
 import { splitAlignmentCandidates } from './split-evaluator'
 import { compareFinalRecommendations } from './rules'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
-import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationCandidate, Recommendation, RecommendationChange, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan, Split, WorkoutTemplate } from './models'
+import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationCandidate, Recommendation, RecommendationChange, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan, Split, WorkoutTemplate, PlanningAuthority } from './models'
 
 export interface RecommendationInput {
   plan: WorkoutPlan
@@ -17,6 +17,7 @@ export interface RecommendationInput {
   decisions?: RecommendationDecision[]
   split?: Split
   splitWorkouts?: WorkoutTemplate[]
+  authority?: PlanningAuthority
 }
 
 /**
@@ -31,11 +32,12 @@ export function generateRecommendations(input: RecommendationInput): Recommendat
   const goalCriticalExerciseIds = planned
     .filter(({ exerciseId }) => exercises.find((exercise) => exercise.id === exerciseId)?.primaryMuscles.some((muscle) => priorityProfile.rankOf(muscle) !== undefined))
     .map(({ exerciseId }) => exerciseId)
-  const candidates = [
-    ...evaluatePlan(plan, exercises, history, preferences, asOf, availableLoads, decisions),
+  const userOwnsPlan = input.authority !== 'recommended'
+  const candidates: RecommendationCandidate[] = [
+    ...(userOwnsPlan ? evaluatePlan(plan, exercises, history, preferences, asOf, availableLoads, decisions) : []),
     ...adaptWorkout(plan, exercises, todaysContext, preferences),
     ...adaptWorkoutForTime(plan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds),
-    ...(input.split && input.splitWorkouts ? splitAlignmentCandidates(input.split, input.splitWorkouts, exercises, preferences) : []),
+    ...(userOwnsPlan && input.split && input.splitWorkouts ? splitAlignmentCandidates(input.split, input.splitWorkouts, exercises, preferences) : []),
   ]
   const finalCandidates = resolveConcreteConflicts(candidates)
   const exerciseOrder = new Map(planExerciseIds(plan).map((exerciseId, index) => [exerciseId, index]))

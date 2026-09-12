@@ -79,6 +79,8 @@ export interface WorkoutSession {
   completedAt?: string
   notes?: string
   unit?: WeightUnit
+  /** Whether this session came from Bobby's generated workout or a user-owned plan. */
+  planningAuthority?: PlanningAuthority
   /** Snapshot of the plan when the session began; legacy history has none. */
   plannedExercises?: PlannedExercise[]
   sets: LoggedSet[]
@@ -98,9 +100,12 @@ export interface WorkoutTemplate {
   /** Transitional projection for existing recommendation code and persisted plans. */
   exerciseIds: string[]
   saved?: boolean
+  /** Absent legacy/user plans are treated as `user-plan`. */
+  planningAuthority?: PlanningAuthority
 }
 
 export type WorkoutPlan = WorkoutTemplate
+export type PlanningAuthority = 'recommended' | 'user-plan'
 
 export type TrainingGoal = 'Build muscle' | 'Get stronger' | 'Improve athletic performance' | 'Improve a specific skill' | 'General fitness' | 'Aesthetic physique'
 export type WeightUnit = 'kg' | 'lb'

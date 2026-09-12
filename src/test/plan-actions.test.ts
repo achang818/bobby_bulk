@@ -32,6 +32,16 @@ describe('applyAcceptedRecommendation', () => {
     expect(applyAcceptedRecommendation(plan, recommendation('REMOVE', 'a')).exerciseIds).toEqual(['b'])
   })
 
+  it('records split feedback without silently mutating the plan', () => {
+    const splitRecommendation: Recommendation = {
+      id: 'split-priority', type: 'SPLIT', priority: 5, target: { kind: 'split', splitId: 'split' },
+      change: { kind: 'split-adjustment', muscle: 'Side delts', desiredFrequency: 3, plannedFrequency: 1, issue: 'under-frequency' },
+      reason: 'test', trace: { ruleId: 'adjust-split-for-priority' as never, principleId: 'split-equivalence', principleDescription: 'test', evidenceLevel: 'A', source: { name: 'test' } },
+    }
+
+    expect(applyAcceptedRecommendation(plan, splitRecommendation).exerciseIds).toEqual(plan.exerciseIds)
+  })
+
   it.each(['PROGRESSION', 'KEEP'] as const)('does not mutate a plan for %s', (type) => {
     expect(applyAcceptedRecommendation(plan, recommendation(type, 'a')).exerciseIds).toEqual(['a', 'b'])
   })

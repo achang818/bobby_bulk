@@ -8,6 +8,7 @@ import { calculateExerciseFeatures, comparePlannedVsActual } from "./domain/feat
 import { evaluateWorkout } from "./domain/workout-evaluator";
 import { evaluateSplit } from "./domain/split-evaluator";
 import { generateRecommendations, recommendationExerciseId } from "./domain/recommendations";
+import { generateRecommendedWorkout } from "./domain/recommended-workout";
 import { loadLocalFileSnapshot, restoreBrowserData, saveLocalFileSnapshot } from "./domain/local-file-sync";
  import { clearActiveWorkoutSession, loadActiveWorkoutSession, loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, persistWorkouts, saveActiveWorkoutSession, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
@@ -98,7 +99,7 @@ function App() {
     const workoutsInCurrentUnit = useMemo(() => workouts.map((workout) => ({ ...workout, unit: preferences.weightUnit, sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(effectiveLoad(set, preferences.bodyweightLb), workout.unit, preferences.weightUnit), })), })), [preferences.bodyweightLb, preferences.weightUnit, workouts]);
     const activePlanExerciseIds = planExerciseIds(activePlan);
     const currentSplit = useMemo<Split | undefined>(() => plans.length ? { id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) } : undefined, [plans]);
-    const planRecommendations = useMemo(() => generateRecommendations({ plan: activePlan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans }), [activePlan, currentGym.availableLoads, currentSplit, plans, preferences, recommendationDecisions, todaysContext, workoutsInCurrentUnit]);
+    const planRecommendations = useMemo(() => generateRecommendations({ plan: activePlan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: activePlan.planningAuthority ?? "user-plan" }), [activePlan, currentGym.availableLoads, currentSplit, plans, preferences, recommendationDecisions, todaysContext, workoutsInCurrentUnit]);
     const sessionRecommendations = useMemo(() => planRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), [planRecommendations, recommendationDecisions]);
     const resolvedPlan = useMemo(() => resolveWorkoutForToday(activePlan, sessionRecommendations, exercises), [activePlan, sessionRecommendations]);
     const workoutExerciseIds = useMemo(() => activeSession?.plannedExercises?.map((exercise) => exercise.exerciseId) ?? planExerciseIds(resolvedPlan), [activeSession, resolvedPlan]);
@@ -172,7 +173,7 @@ function App() {
             setShowLogger(true);
             return;
         }
-        const generatedRecommendations = generateRecommendations({ plan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans });
+        const generatedRecommendations = generateRecommendations({ plan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: "user-plan" });
         const sessionPlan = resolveWorkoutForToday(plan, generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), exercises);
         const shortenedExerciseIds = planExerciseIds(sessionPlan);
         const initialExerciseIds = shortenedExerciseIds.length ? shortenedExerciseIds : plan.id === "empty-workout" ? [exercises[0].id] : [];
@@ -188,18 +189,19 @@ function App() {
             setShowLogger(true);
             return;
         }
-        if (workoutExerciseIds.length === 0) {
-            setView("plans");
-            return;
-        }
-        setSelectedExerciseId(workoutExerciseIds[0] ?? exercises[0].id);
+        const recommended = generateRecommendedWorkout({ exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads });
+        const recommendedExercises = recommended.workout.plannedExercises ?? [];
+        setActivePlan(recommended.workout);
+        setSelectedExerciseId(recommendedExercises[0]?.exerciseId ?? exercises[0].id);
         setSetInputOverrides({});
-        setActiveSession(createWorkoutSession(activePlan, sessionPlannedExercises));
+        setActiveSession(createWorkoutSession(recommended.workout, recommendedExercises));
         setShowLogger(true);
     }
     function handleRecommendationDecision(recommendation: Recommendation, decision: "accepted" | "rejected" | "dismissed") {
         setRecommendationDecisions(saveRecommendationDecision(recommendation, decision));
         if (decision !== "accepted")
+            return;
+        if (activePlan.planningAuthority === "recommended")
             return;
         const updatedPlan = applyAcceptedRecommendation(activePlan, recommendation);
         if (planExerciseIds(updatedPlan).join("|") === activePlanExerciseIds.join("|"))
@@ -288,7 +290,9 @@ function EvaluatedTodayView({ plan, exerciseIds, setTargets, recommendations, de
         column.insertBefore(panel, column.children[1] ?? null);
         return () => panel.remove();
     }, [workoutHealth]);
-    const hasWorkout = exerciseIds.length > 0;
+    // The primary action always starts a generative Recommended Workout. User
+    // plans remain available explicitly through "Choose something else".
+    const hasWorkout = true;
     return (<>      <section className="page-intro">        <div>          <p className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" })}</p>          <h1>Today's Recommendation</h1>          <p className="lede">            A focused session based on your plan, recent training, and performance.          </p>        </div>        <button className="primary-button" onClick={hasWorkout ? onLog : onChooseSomethingElse}>          {hasWorkout ? "Start workout" : "Create a plan"}        </button>      </section>      <section className="dashboard-grid">        <div className="recommendation-panel">          <div className="panel-topline">            <span className="status-dot"></span>            <span>Recommended session</span>            <span className="confidence">              {recommendations.length} observations            </span>            <span className="fatigue-indicator">Fatigue {fatigue}</span>          </div>          <div className="recommendation-main">            <div>              <p className="eyebrow warm">YOUR NEXT WORKOUT · LOADS IN {unit}</p>              <h2>{plan.name}</h2>              <p className="recommendation-sub">                Based on your plan, recent training, and performance.              </p>            </div>            <div className="weight-callout">              <strong>{exerciseIds.length}</strong>              <span>movements</span>            </div>          </div>          <div className="today-plan-list">            <div className="today-plan-label">Recommended working sets</div>            {!hasWorkout && <p className="empty-state">Create your first plan to give Bobby a routine to adapt and evaluate.</p>}            {exerciseIds.map((id, index) => {
             const exercise = exercises.find((item) => item.id === id);
             const progression = recommendations.find((item) => item.type === "PROGRESSION" && recommendationExerciseId(item) === id)?.change;

@@ -145,6 +145,28 @@ Bobby should not silently rewrite it.
 
 When the user opens Bobby, the home screen should present a recommended workout.
 
+## Planning authority
+
+Bobby supports two deliberately distinct modes:
+
+* **Recommended Workout:** Bobby has planning authority. It can construct a
+  complete, executable session without an existing plan or split, using goals,
+  ordered muscle priorities, recent direct working-set history, training state,
+  exercise preferences, available equipment, and today's time/context. Explicit
+  muscle priorities refine and take precedence over goal-derived defaults. The
+  generated workout is temporary: it does not silently create or modify a
+  user-owned plan.
+* **My Plans:** the user has planning authority. A saved plan remains the
+  baseline structure; Bobby may adapt it for today's context and propose
+  explainable recommendations. It changes only when the user explicitly accepts
+  a supported recommendation.
+
+Recommended Workout first selects appropriately recovered muscle opportunities,
+then selects compatible exercises and working-set prescriptions from the normal
+exercise catalog. It can operate with zero plans and no split. Split evaluation
+continues to assess user-owned recurring structure; automatic split generation
+is outside this scope.
+
 Example:
 
 > ## Today's Recommendation
