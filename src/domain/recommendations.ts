@@ -1,9 +1,10 @@
 import { adaptWorkout, adaptWorkoutForTime } from './adaptation'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { evaluatePlan } from './plan-evaluator'
+import { splitAlignmentCandidates } from './split-evaluator'
 import { compareFinalRecommendations } from './rules'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
-import type { AvailableLoad, Exercise, RecommendationCandidate, Recommendation, RecommendationChange, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan } from './models'
+import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationCandidate, Recommendation, RecommendationChange, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan, Split, WorkoutTemplate } from './models'
 
 export interface RecommendationInput {
   plan: WorkoutPlan
@@ -14,6 +15,8 @@ export interface RecommendationInput {
   availableLoads?: AvailableLoad[]
   asOf?: string
   decisions?: RecommendationDecision[]
+  split?: Split
+  splitWorkouts?: WorkoutTemplate[]
 }
 
 /**
@@ -32,6 +35,7 @@ export function generateRecommendations(input: RecommendationInput): Recommendat
     ...evaluatePlan(plan, exercises, history, preferences, asOf, availableLoads, decisions),
     ...adaptWorkout(plan, exercises, todaysContext, preferences),
     ...adaptWorkoutForTime(plan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds),
+    ...(input.split && input.splitWorkouts ? splitAlignmentCandidates(input.split, input.splitWorkouts, exercises, preferences) : []),
   ]
   const finalCandidates = resolveConcreteConflicts(candidates)
   const exerciseOrder = new Map(planExerciseIds(plan).map((exerciseId, index) => [exerciseId, index]))
@@ -46,13 +50,20 @@ export function generateRecommendations(input: RecommendationInput): Recommendat
  * or progression suggestions remain valid and are never capped by type.
  */
 export function resolveConcreteConflicts(candidates: RecommendationCandidate[]): RecommendationCandidate[] {
-  const removedExerciseIds = new Set(candidates.filter((candidate) => candidate.type === 'REMOVE').map((candidate) => candidate.exerciseId))
-  const contextualReplacementByExercise = new Map(candidates
+  const exerciseCandidates = candidates.filter(isExerciseCandidate)
+  const removedExerciseIds = new Set(exerciseCandidates.filter((candidate) => candidate.type === 'REMOVE').map((candidate) => candidate.exerciseId))
+  const contextualReplacementByExercise = new Map(exerciseCandidates
     .filter((candidate) => candidate.type === 'REPLACE' && candidate.trace.ruleId === 'adapt-unavailable-equipment')
     .map((candidate) => [candidate.exerciseId, candidate]))
   const seen = new Set<string>()
 
   return candidates.filter((candidate) => {
+    if (!isExerciseCandidate(candidate)) {
+      const key = `SPLIT:${candidate.splitId}:${candidate.muscle}:${candidate.desiredFrequency}:${candidate.plannedFrequency}:${candidate.issue}`
+      if (seen.has(key)) return false
+      seen.add(key)
+      return true
+    }
     // Removing an exercise is incompatible with every other change to that
     // same exercise; the time rule has already established removal is needed.
     if (removedExerciseIds.has(candidate.exerciseId) && candidate.type !== 'REMOVE') return false
@@ -60,15 +71,32 @@ export function resolveConcreteConflicts(candidates: RecommendationCandidate[]):
     // a historical-variation rule. The context replacement is the hard winner.
     const contextual = contextualReplacementByExercise.get(candidate.exerciseId)
     if (contextual && candidate !== contextual) return false
-    // Candidate rules can overlap; collapse only identical final actions.
-    const key = candidate.type === 'ADD' ? `ADD:${candidate.exerciseId}` : candidate.id
+    // Candidate rules can overlap; collapse only the exact same action. The
+    // key intentionally includes the actionable payload so two valid changes
+    // of the same type to different exercises remain independent.
+    const key = candidateActionKey(candidate)
     if (seen.has(key)) return false
     seen.add(key)
     return true
   })
 }
 
+function candidateActionKey(candidate: RecommendationCandidate): string {
+  if (!isExerciseCandidate(candidate)) return `SPLIT:${candidate.splitId}:${candidate.muscle}:${candidate.desiredFrequency}:${candidate.plannedFrequency}:${candidate.issue}`
+  switch (candidate.type) {
+    case 'KEEP': return `KEEP:${candidate.exerciseId}`
+    case 'PROGRESSION': return `PROGRESSION:${candidate.exerciseId}:${candidate.progression?.weight ?? ''}:${candidate.progression?.repRange.min ?? ''}:${candidate.progression?.repRange.max ?? ''}`
+    case 'ADD': return `ADD:${candidate.exerciseId}`
+    case 'REPLACE': return `REPLACE:${candidate.exerciseId}:${candidate.alternativeExerciseId ?? ''}`
+    case 'REMOVE': return `REMOVE:${candidate.exerciseId}`
+    case 'MODIFY': return `MODIFY:${candidate.exerciseId}:${candidate.modifiedSets ?? ''}`
+  }
+}
+
 function toRecommendation(candidate: RecommendationCandidate, exercises: Exercise[]): Recommendation | undefined {
+  if (!isExerciseCandidate(candidate)) {
+    return { id: candidate.id, type: candidate.type, priority: candidate.score, target: { kind: 'split', splitId: candidate.splitId }, change: { kind: 'split-adjustment', muscle: candidate.muscle, desiredFrequency: candidate.desiredFrequency, plannedFrequency: candidate.plannedFrequency, issue: candidate.issue }, reason: candidate.reasons[0] ?? candidate.trace.principleDescription, trace: candidate.trace }
+  }
   const exercise = exercises.find((item) => item.id === candidate.exerciseId)
   if (!exercise) return undefined
   const change = changeFor(candidate, exercise)
@@ -85,6 +113,7 @@ function toRecommendation(candidate: RecommendationCandidate, exercises: Exercis
 }
 
 function changeFor(candidate: RecommendationCandidate, exercise: Exercise): RecommendationChange | undefined {
+  if (!isExerciseCandidate(candidate)) return undefined
   switch (candidate.type) {
     case 'KEEP': return { kind: 'keep' }
     case 'PROGRESSION': return candidate.progression ? { kind: 'progression', recommendedLoad: candidate.progression.weight, repRange: candidate.progression.repRange } : undefined
@@ -93,6 +122,10 @@ function changeFor(candidate: RecommendationCandidate, exercise: Exercise): Reco
     case 'REMOVE': return { kind: 'remove', exerciseId: candidate.exerciseId }
     case 'MODIFY': return candidate.modifiedSets === undefined ? undefined : { kind: 'modify', exerciseId: candidate.exerciseId, changes: { sets: candidate.modifiedSets } }
   }
+}
+
+function isExerciseCandidate(candidate: RecommendationCandidate): candidate is ExerciseRecommendationCandidate {
+  return candidate.type !== 'SPLIT'
 }
 
 export function recommendationExerciseId(recommendation: Recommendation): string | undefined {

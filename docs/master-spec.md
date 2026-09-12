@@ -526,6 +526,23 @@ session constraints:
   receive fresher placement before lower-priority competing work when safety,
   technique, compounds, supersets, and fatigue management allow.
 
+### Goal-to-split alignment
+
+Goals establish desired outcomes, and explicit priorities refine them. The
+saved split then establishes recurring direct training opportunities. Before
+trying to repeatedly compensate inside individual workouts, Bobby evaluates
+whether the split gives each resolved priority a practical, reasonably
+distributed number of direct opportunities relative to the available split
+entries. These are bounded targets, not exact required frequencies.
+
+When a material gap or concentrated opportunity pattern is found, Bobby can
+surface an advisory split-alignment recommendation explaining the affected
+priority and the structural issue. Bobby never silently rewrites a split,
+switches a program, or uses repeated exercise additions as a permanent
+substitute for a structurally inadequate split. Actual completed history may
+later be compared with these planned opportunities without changing this
+planned-split assessment.
+
 Warm-up, drop, and failure sets are not substituted for productive direct
 working sets in this priority logic. Priority never overrides recovery or turns
 one poor session into a programming change.

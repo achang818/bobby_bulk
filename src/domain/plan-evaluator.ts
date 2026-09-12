@@ -5,7 +5,7 @@ import { buildTrace, compareRecommendations } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
 import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
-import type { AvailableLoad, Exercise, RecommendationCandidate, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
+import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
 
 // A single workout plan has no weekly split/calendar context. Three is a
 // conservative opportunity ceiling for detecting sparse recent exposure; the
@@ -14,8 +14,8 @@ export const PLAN_FREQUENCY_OPPORTUNITIES = 3
 
 type PriorityAddReason = 'missing-slot' | 'low-volume' | 'low-frequency'
 
-export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): RecommendationCandidate[] {
-  const recommendations: RecommendationCandidate[] = []
+export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): ExerciseRecommendationCandidate[] {
+  const recommendations: ExerciseRecommendationCandidate[] = []
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const planExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
   const planExercises = plannedExercises.flatMap((planned) => {

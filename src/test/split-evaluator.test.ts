@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { exercises } from '../domain/exercises'
-import { evaluateSplit } from '../domain/split-evaluator'
-import type { Split, WorkoutTemplate } from '../domain/models'
+import { evaluateSplit, splitAlignmentCandidates } from '../domain/split-evaluator'
+import type { Split, UserPreferences, WorkoutTemplate } from '../domain/models'
 
 const make = (id: string, exerciseIds: string[]): WorkoutTemplate => ({ id, name: id, description: '', focus: '', exerciseIds, plannedExercises: exerciseIds.map((exerciseId, order) => ({ exerciseId, order, sets: 3, repRange: exercises.find((item) => item.id === exerciseId)!.repRange, setType: 'working' as const })) })
 const makeWithSets = (id: string, entries: { exerciseId: string; sets: number }[]): WorkoutTemplate => ({ id, name: id, description: '', focus: '', exerciseIds: entries.map((entry) => entry.exerciseId), plannedExercises: entries.map((entry, order) => ({ ...entry, order, repRange: exercises.find((item) => item.id === entry.exerciseId)!.repRange, setType: 'working' as const })) })
@@ -100,6 +100,14 @@ describe('evaluateSplit', () => {
     expect(result.findings.some((item) => item.category === 'frequency' && item.title.includes('Abs'))).toBe(false)
   })
 
+  it('also bounds desired frequency by an explicitly intended weekly split frequency', () => {
+    const workouts = [make('delt', ['cable-lateral-raise']), make('pull', ['lat-pulldown']), make('push', ['barbell-bench-press'])]
+    const weeklyTwoDaySplit: Split = { ...split(workouts.map((workout) => workout.id)), intendedFrequency: 2 }
+    const result = evaluateSplit(weeklyTwoDaySplit, workouts, exercises, { goals: [], priorities: ['Side delts'] })
+
+    expect(result.priorityOpportunities[0]).toMatchObject({ desiredFrequency: 2, plannedFrequency: 1, status: 'under-served' })
+  })
+
   it('identifies a hierarchy inversion without escalating a small emphasis difference to a warning', () => {
     const inverted = [
       make('one', ['cable-lateral-raise', 'lat-pulldown', 'incline-db-bench']),
@@ -119,5 +127,57 @@ describe('evaluateSplit', () => {
     const emphasis = result.findings.find((item) => item.title.includes('Abs receives less split emphasis than Side delts'))
     expect(emphasis).toMatchObject({ severity: 'info' })
     expect(result.findings.some((item) => item.title.includes('Abs receives less split emphasis than Side delts') && item.severity === 'warning')).toBe(false)
+  })
+
+  it('keeps a split that adequately supports its highest explicit priority', () => {
+    const workouts = [make('abs-a', ['cable-crunch']), make('abs-b', ['cable-crunch']), make('abs-c', ['cable-crunch'])]
+    const preferences = { goals: [], priorities: ['Abs'] }
+    const result = evaluateSplit(split(workouts.map((workout) => workout.id)), workouts, exercises, preferences)
+
+    expect(result.priorityOpportunities).toContainEqual(expect.objectContaining({ muscle: 'Abs', source: 'explicit', desiredFrequency: 3, plannedFrequency: 3, status: 'adequate' }))
+    expect(splitAlignmentCandidates(split(workouts.map((workout) => workout.id)), workouts, exercises, preferences)).toEqual([])
+  })
+
+  it('recommends an advisory split adjustment for a materially under-served priority', () => {
+    const workouts = [make('delt', ['cable-lateral-raise']), make('pull', ['lat-pulldown']), make('push', ['barbell-bench-press'])]
+    const preferences = { goals: [], priorities: ['Side delts'] }
+    const candidates = splitAlignmentCandidates(split(workouts.map((workout) => workout.id)), workouts, exercises, preferences)
+
+    expect(candidates).toContainEqual(expect.objectContaining({ type: 'SPLIT', muscle: 'Side delts', desiredFrequency: 3, plannedFrequency: 1, issue: 'under-frequency' }))
+  })
+
+  it('evaluates multiple priorities independently and lets explicit priorities lead goal defaults', () => {
+    const workouts = [make('abs', ['cable-crunch']), make('pull', ['lat-pulldown']), make('push', ['barbell-bench-press'])]
+    const preferences: Pick<UserPreferences, 'goals' | 'priorities'> = { goals: ['Aesthetic physique'], priorities: ['Abs', 'Upper chest'] }
+    const result = evaluateSplit(split(workouts.map((workout) => workout.id)), workouts, exercises, preferences)
+    const candidates = splitAlignmentCandidates(split(workouts.map((workout) => workout.id)), workouts, exercises, preferences)
+
+    expect(result.priorityOpportunities.slice(0, 2).map((item) => [item.muscle, item.source])).toEqual([['Abs', 'explicit'], ['Upper chest', 'explicit']])
+    expect(candidates.filter((candidate) => candidate.type === 'SPLIT').map((candidate) => candidate.muscle)).toEqual(expect.arrayContaining(['Abs', 'Upper chest']))
+  })
+
+  it('uses goal-derived priorities when explicit priorities are absent', () => {
+    const workouts = [make('pull', ['lat-pulldown']), make('push', ['barbell-bench-press'])]
+    const preferences: Pick<UserPreferences, 'goals' | 'priorities'> = { goals: ['Aesthetic physique'], priorities: [] }
+    const result = evaluateSplit(split(workouts.map((workout) => workout.id)), workouts, exercises, preferences)
+
+    expect(result.priorityOpportunities[0]).toMatchObject({ muscle: 'Side delts', source: 'goal-derived', status: 'under-served' })
+  })
+
+  it('distinguishes concentrated adequate opportunities from a distributed split', () => {
+    const concentrated = [make('delt-a', ['cable-lateral-raise']), make('delt-b', ['db-lateral-raise']), make('pull', ['lat-pulldown']), make('push', ['barbell-bench-press'])]
+    const result = evaluateSplit(split(concentrated.map((workout) => workout.id)), concentrated, exercises, { goals: [], priorities: ['Side delts'] })
+    const candidate = splitAlignmentCandidates(split(concentrated.map((workout) => workout.id)), concentrated, exercises, { goals: [], priorities: ['Side delts'] }).find((item) => item.type === 'SPLIT')
+
+    expect(result.priorityOpportunities[0]).toMatchObject({ plannedFrequency: 2, distribution: 'concentrated', status: 'adequate' })
+    expect(candidate).toMatchObject({ issue: 'concentrated-opportunities' })
+  })
+
+  it('is deterministic for identical split and priority inputs', () => {
+    const workouts = [make('delt', ['cable-lateral-raise']), make('pull', ['lat-pulldown']), make('push', ['barbell-bench-press'])]
+    const input = split(workouts.map((workout) => workout.id))
+    const preferences = { goals: [], priorities: ['Side delts'] }
+
+    expect(splitAlignmentCandidates(input, workouts, exercises, preferences)).toEqual(splitAlignmentCandidates(input, workouts, exercises, preferences))
   })
 })

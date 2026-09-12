@@ -1,4 +1,4 @@
-import type { RecommendationCandidate, Recommendation, RecommendationTrace } from './models'
+import type { ExerciseRecommendationCandidate, Recommendation, RecommendationTrace } from './models'
 import { findPrinciple } from './knowledge-base'
 
 export const decisionRules = {
@@ -11,6 +11,7 @@ export const decisionRules = {
   'add-for-priority-frequency': 'frequency-distribution',
   'adapt-unavailable-equipment': 'equipment-constraint',
   'adapt-available-time': 'time-constraint',
+  'adjust-split-for-priority': 'split-equivalence',
 } as const
 
 export type DecisionRuleId = keyof typeof decisionRules
@@ -27,7 +28,7 @@ export function buildTrace(ruleId: DecisionRuleId): RecommendationTrace {
 }
 
 /** Recommendation-type priority only; never an exercise-quality score. */
-export function compareRecommendations(left: RecommendationCandidate, right: RecommendationCandidate, exerciseOrder: ReadonlyMap<string, number> = new Map()) {
+export function compareRecommendations(left: ExerciseRecommendationCandidate, right: ExerciseRecommendationCandidate, exerciseOrder: ReadonlyMap<string, number> = new Map()) {
   const priority = right.score - left.score
   if (priority) return priority
   const leftOrder = exerciseOrder.get(left.exerciseId) ?? Number.MAX_SAFE_INTEGER

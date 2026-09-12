@@ -302,8 +302,10 @@ export interface WorkoutFinding { category: WorkoutFindingCategory; severity: Wo
 export interface WorkoutEvaluation { plannedSets: number; estimatedMinutes: number; primaryMuscleSets: Record<string, number>; secondaryMuscles: string[]; movementPatterns: MovementPattern[]; findings: WorkoutFinding[] }
 export interface Split { id: string; name: string; workoutIds: string[]; intendedFrequency?: number; notes?: string }
 export interface Program { id: string; name: string; splitId: string; goalIds?: string[]; notes?: string }
-export interface SplitFinding { category: 'frequency' | 'volume' | 'recovery' | 'redundancy' | 'distribution' | 'complementarity' | 'goal-alignment' | 'structure'; severity: 'info' | 'warning'; title: string; description: string; evidence: string[] }
+export interface SplitFinding { category: 'frequency' | 'volume' | 'recovery' | 'redundancy' | 'distribution' | 'complementarity' | 'goal-alignment' | 'priority-distribution' | 'structure'; severity: 'info' | 'warning'; title: string; description: string; evidence: string[] }
 export interface SplitMuscleSummary { muscle: string; workoutCount: number; plannedWorkingSets: number }
+/** Planned direct opportunities for one resolved priority muscle. */
+export interface SplitPriorityOpportunity { muscle: string; rank: number; source: 'explicit' | 'goal-derived'; desiredFrequency: number; plannedFrequency: number; plannedWorkingSets: number; distribution: 'distributed' | 'concentrated' | 'not-applicable'; status: 'adequate' | 'under-served' | 'insufficient-information'; workoutNames: string[] }
 export interface SplitAssessment {
   distribution: 'balanced' | 'concentrated' | 'insufficient information'
   recovery: 'spaced' | 'potential overlap' | 'insufficient information'
@@ -311,9 +313,9 @@ export interface SplitAssessment {
   complementarity: 'complementary' | 'substantially overlapping' | 'insufficient information'
   goalAlignment: 'aligned' | 'limited' | 'not assessed'
 }
-export interface SplitEvaluation { splitId: string; workouts: WorkoutEvaluation[]; muscleSummary: SplitMuscleSummary[]; findings: SplitFinding[]; overallAssessment: SplitAssessment }
+export interface SplitEvaluation { splitId: string; workouts: WorkoutEvaluation[]; muscleSummary: SplitMuscleSummary[]; priorityOpportunities: SplitPriorityOpportunity[]; findings: SplitFinding[]; overallAssessment: SplitAssessment }
 
-export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY'
+export type PlanRecommendationType = 'KEEP' | 'PROGRESSION' | 'ADD' | 'REPLACE' | 'REMOVE' | 'MODIFY' | 'SPLIT'
 
 export type EvidenceLevel = 'A' | 'B' | 'C' | 'D' | 'Personal'
 
@@ -346,9 +348,9 @@ export interface RecommendationTrace {
  * Intermediate output from one decision rule. Only `recommendations.ts`
  * converts these into the stable, user-facing `Recommendation` contract.
  */
-export interface RecommendationCandidate {
+export interface ExerciseRecommendationCandidate {
   id: string
-  type: PlanRecommendationType
+  type: Exclude<PlanRecommendationType, 'SPLIT'>
   exerciseId: string
   alternativeExerciseId?: string
   score: number
@@ -373,6 +375,7 @@ export interface RecommendationDecision {
 export type RecommendationTarget =
   | { kind: 'exercise'; exerciseId: string; plannedExerciseId?: string }
   | { kind: 'workout'; workoutId: string }
+  | { kind: 'split'; splitId: string }
   | { kind: 'muscle'; muscle: string }
 
 export type RecommendationChange =
@@ -382,6 +385,7 @@ export type RecommendationChange =
   | { kind: 'replace'; fromExerciseId: string; toExerciseId: string }
   | { kind: 'remove'; exerciseId: string }
   | { kind: 'modify'; exerciseId: string; changes: { sets?: number; repRange?: { min: number; max: number } } }
+  | { kind: 'split-adjustment'; muscle: string; desiredFrequency: number; plannedFrequency: number; issue: 'under-frequency' | 'concentrated-opportunities' }
 
 /** Final deterministic output of Bobby's recommendation pipeline. */
 export interface Recommendation {
@@ -394,6 +398,23 @@ export interface Recommendation {
   reason: string
   trace: RecommendationTrace
 }
+
+/** A non-mutating structural recommendation for the user's recurring split. */
+export interface SplitRecommendationCandidate {
+  id: string
+  type: 'SPLIT'
+  splitId: string
+  muscle: string
+  score: number
+  desiredFrequency: number
+  plannedFrequency: number
+  distribution: SplitPriorityOpportunity['distribution']
+  issue: 'under-frequency' | 'concentrated-opportunities'
+  reasons: string[]
+  trace: RecommendationTrace
+}
+
+export type RecommendationCandidate = ExerciseRecommendationCandidate | SplitRecommendationCandidate
 
 /** Progression-rule evidence before it is composed into a final Recommendation. */
 export interface ProgressionRecommendation {

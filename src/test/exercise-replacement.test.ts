@@ -4,7 +4,7 @@ import { exercises } from '../domain/exercises'
 import { evaluatePlan } from '../domain/plan-evaluator'
 import { defaultPreferences } from '../domain/preferences'
 import { compareRecommendations } from '../domain/rules'
-import type { Exercise, RecommendationCandidate, Workout, WorkoutPlan } from '../domain/models'
+import type { Exercise, ExerciseRecommendationCandidate, Workout, WorkoutPlan } from '../domain/models'
 
 const catalog = (id: string) => exercises.find((item) => item.id === id)!
 const copy = (base: Exercise, id: string, name: string, changes: Partial<Exercise> = {}): Exercise => ({ ...base, id, name, ...changes })
@@ -66,7 +66,7 @@ describe('shared exercise replacement engine', () => {
 
 describe('recommendation ordering', () => {
   const trace = { ruleId: 'test' as never, principleId: 'test', principleDescription: 'test', evidenceLevel: 'D' as const, source: { name: 'test' } }
-  const recommendation = (id: string, exerciseId: string, score: number): RecommendationCandidate => ({ id, type: 'KEEP', exerciseId, score, reasons: [], trace })
+  const recommendation = (id: string, exerciseId: string, score: number): ExerciseRecommendationCandidate => ({ id, type: 'KEEP', exerciseId, score, reasons: [], trace })
 
   it('orders recommendation priority before explicit workout order and IDs', () => {
     const low = recommendation('low', 'second', 3)

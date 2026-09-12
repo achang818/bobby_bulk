@@ -1,9 +1,11 @@
 import { evaluateWorkout } from './workout-evaluator'
 import { plannedExercisesFor } from './workout-session'
 import { resolveMusclePriorities } from './muscle-priorities'
-import type { Exercise, Split, SplitAssessment, SplitEvaluation, SplitFinding, UserPreferences, WorkoutEvaluation, WorkoutTemplate } from './models'
+import { buildTrace } from './rules'
+import type { Exercise, RecommendationCandidate, Split, SplitAssessment, SplitEvaluation, SplitFinding, SplitPriorityOpportunity, UserPreferences, WorkoutEvaluation, WorkoutTemplate } from './models'
 
 type EvaluatedWorkout = { workout: WorkoutTemplate; evaluation: WorkoutEvaluation; splitIndex: number }
+type MuscleAllocation = { workoutCount: number; plannedWorkingSets: number; indexes: number[]; workoutNames: string[] }
 
 /** Evaluates structure without assuming an ideal split or weekly schedule. */
 export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercises: Exercise[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitEvaluation {
@@ -14,7 +16,7 @@ export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercis
     if (!workout) missing.push(id)
     else entries.push({ workout, splitIndex, evaluation: evaluateWorkout(workout, exercises, undefined, preferences) })
   })
-  const muscles = new Map<string, { workoutCount: number; plannedWorkingSets: number; indexes: number[]; workoutNames: string[] }>()
+  const muscles = new Map<string, MuscleAllocation>()
   for (const entry of entries) for (const [muscle, sets] of Object.entries(entry.evaluation.primaryMuscleSets)) {
     const prior = muscles.get(muscle) ?? { workoutCount: 0, plannedWorkingSets: 0, indexes: [], workoutNames: [] }
     muscles.set(muscle, { workoutCount: prior.workoutCount + 1, plannedWorkingSets: prior.plannedWorkingSets + sets, indexes: [...prior.indexes, entry.splitIndex], workoutNames: [...prior.workoutNames, entry.workout.name] })
@@ -22,12 +24,14 @@ export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercis
   const muscleSummary = [...muscles.entries()].map(([muscle, value]) => ({ muscle, workoutCount: value.workoutCount, plannedWorkingSets: value.plannedWorkingSets })).sort((a, b) => b.plannedWorkingSets - a.plannedWorkingSets || a.muscle.localeCompare(b.muscle))
   const findings: SplitFinding[] = []
   if (missing.length) findings.push(finding('structure', 'warning', 'Missing workout references', 'One or more workouts referenced by this split could not be found. The remaining assessment uses the workouts that are available.', missing))
-  if (!entries.length) return { splitId: split.id, workouts: [], muscleSummary: [], findings, overallAssessment: insufficientAssessment(preferences) }
-  findings.push(...recoveryFindings(muscles), ...distributionFindings(muscleSummary), ...redundancyFindings(entries, exercises), ...complementarityFindings(entries), ...priorityFindings(entries, muscleSummary, preferences))
-  return { splitId: split.id, workouts: entries.map((entry) => entry.evaluation), muscleSummary, findings, overallAssessment: assessmentFor(entries, muscleSummary, findings, preferences) }
+  if (!entries.length) return { splitId: split.id, workouts: [], muscleSummary: [], priorityOpportunities: [], findings, overallAssessment: insufficientAssessment(preferences) }
+  const availableWorkoutOpportunities = Math.min(entries.length, split.intendedFrequency ?? entries.length)
+  const priorityOpportunities = priorityOpportunitiesFor(entries, muscles, preferences, availableWorkoutOpportunities)
+  findings.push(...recoveryFindings(muscles), ...distributionFindings(muscleSummary), ...redundancyFindings(entries, exercises), ...complementarityFindings(entries), ...priorityFindings(priorityOpportunities, muscleSummary, preferences))
+  return { splitId: split.id, workouts: entries.map((entry) => entry.evaluation), muscleSummary, priorityOpportunities, findings, overallAssessment: assessmentFor(entries, muscleSummary, findings, preferences) }
 }
 
-function recoveryFindings(muscles: Map<string, { plannedWorkingSets: number; indexes: number[]; workoutNames: string[] }>): SplitFinding[] {
+function recoveryFindings(muscles: Map<string, MuscleAllocation>): SplitFinding[] {
   const findings: SplitFinding[] = []
   for (const [muscle, value] of muscles) {
     const adjacent = value.indexes.findIndex((item, position) => position > 0 && item - value.indexes[position - 1] === 1)
@@ -78,25 +82,71 @@ function complementarityFindings(entries: EvaluatedWorkout[]): SplitFinding[] {
   return findings
 }
 
-function priorityFindings(entries: EvaluatedWorkout[], summary: SplitEvaluation['muscleSummary'], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitFinding[] {
-  const profile = resolveMusclePriorities(preferences)
-  if (!profile.orderedMuscles.length) return []
+function priorityFindings(opportunities: SplitPriorityOpportunity[], summary: SplitEvaluation['muscleSummary'], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitFinding[] {
+  if (!opportunities.length) return []
   const findings: SplitFinding[] = []
-  const prioritySummary = profile.orderedMuscles.map((muscle, rank) => ({ muscle, rank, summary: summary.find((item) => item.muscle.toLowerCase() === muscle.toLowerCase()) }))
-  for (const item of prioritySummary) {
-    if (!item.summary) {
+  for (const item of opportunities) {
+    if (item.plannedFrequency === 0) {
       findings.push(finding('goal-alignment', item.rank < 3 ? 'warning' : 'info', `${item.muscle} has no direct split work`, `No workout in this split has direct planned work for priority #${item.rank + 1} ${item.muscle}. Secondary involvement is not counted as direct volume.`, []))
       continue
     }
-    const desired = profile.desiredFrequency(item.muscle, entries.length)
-    if (entries.length >= desired && item.summary.workoutCount < desired) findings.push(finding('frequency', item.rank < 3 ? 'warning' : 'info', `${item.muscle} is underexposed for its priority`, `Priority #${item.rank + 1} ${item.muscle} has ${item.summary.workoutCount} direct exposure${item.summary.workoutCount === 1 ? '' : 's'} across this split; ${desired} is the practical target given its ${entries.length} workout opportunities.`, [`${item.summary.plannedWorkingSets} direct planned sets`]))
+    if (item.status === 'under-served') findings.push(finding('frequency', item.rank < 3 ? 'warning' : 'info', `${item.muscle} is materially underexposed for its priority`, `Priority #${item.rank + 1} ${item.muscle} has ${item.plannedFrequency} direct exposure${item.plannedFrequency === 1 ? '' : 's'} across this split; ${item.desiredFrequency} is the bounded practical target.`, [`${item.plannedWorkingSets} direct planned sets`, ...item.workoutNames]))
+    if (item.status === 'adequate' && item.distribution === 'concentrated') findings.push(finding('priority-distribution', 'info', `${item.muscle} opportunities are concentrated`, `${item.muscle} reaches its practical direct-exposure target, but those opportunities are concentrated in adjacent split entries rather than spread through the cycle.`, item.workoutNames))
   }
+  const profile = resolveMusclePriorities(preferences)
+  const prioritySummary = opportunities.map((item) => ({ ...item, summary: summary.find((summaryItem) => summaryItem.muscle.toLowerCase() === item.muscle.toLowerCase()) }))
   for (let rank = 0; rank < prioritySummary.length - 1; rank += 1) {
     const higher = prioritySummary[rank]
     const lower = prioritySummary.slice(rank + 1).find((item) => item.summary && higher.summary && (item.summary.workoutCount > higher.summary.workoutCount || item.summary.plannedWorkingSets * profile.volumeWeight(item.muscle) > higher.summary.plannedWorkingSets * profile.volumeWeight(higher.muscle)))
     if (higher.summary && lower?.summary) findings.push(finding('goal-alignment', 'info', `${higher.muscle} receives less split emphasis than ${lower.muscle}`, `${higher.muscle} is priority #${higher.rank + 1}, but ${lower.muscle} has more direct frequency or volume. Consider redistributing existing split work before adding unlimited sets.`, [`${higher.muscle}: ${higher.summary.workoutCount} exposures / ${higher.summary.plannedWorkingSets} sets`, `${lower.muscle}: ${lower.summary.workoutCount} exposures / ${lower.summary.plannedWorkingSets} sets`]))
   }
   return findings
+}
+
+function priorityOpportunitiesFor(entries: EvaluatedWorkout[], muscles: Map<string, MuscleAllocation>, preferences: Pick<UserPreferences, 'goals' | 'priorities'> | undefined, availableWorkoutOpportunities: number): SplitPriorityOpportunity[] {
+  const profile = resolveMusclePriorities(preferences)
+  return profile.orderedMuscles.map((muscle, rank) => {
+    const allocation = [...muscles.entries()].find(([candidate]) => candidate.toLowerCase() === muscle.toLowerCase())?.[1]
+    const plannedFrequency = allocation?.workoutCount ?? 0
+    const desiredFrequency = profile.desiredFrequency(muscle, availableWorkoutOpportunities)
+    const distribution = distributionFor(allocation?.indexes ?? [], entries.length)
+    // Targets are guidance. We surface a structural concern only when there is
+    // no direct work or at least half of the practical opportunity target is missing.
+    const underServed = desiredFrequency > 0 && (plannedFrequency === 0 || plannedFrequency * 2 <= desiredFrequency)
+    return {
+      muscle,
+      rank,
+      source: profile.explicitMuscles.some((item) => item.toLowerCase() === muscle.toLowerCase()) ? 'explicit' : 'goal-derived',
+      desiredFrequency,
+      plannedFrequency,
+      plannedWorkingSets: allocation?.plannedWorkingSets ?? 0,
+      distribution,
+      status: desiredFrequency === 0 ? 'insufficient-information' : underServed ? 'under-served' : 'adequate',
+      workoutNames: allocation?.workoutNames ?? [],
+    }
+  })
+}
+
+function distributionFor(indexes: number[], splitLength: number): SplitPriorityOpportunity['distribution'] {
+  if (indexes.length < 2 || splitLength <= indexes.length) return 'not-applicable'
+  const sorted = [...indexes].sort((left, right) => left - right)
+  const gaps = sorted.map((index, position) => position === sorted.length - 1 ? splitLength - index + sorted[0] : sorted[position + 1] - index)
+  return Math.max(...gaps) > Math.ceil(splitLength / sorted.length) ? 'concentrated' : 'distributed'
+}
+
+/** Produces advisory structural candidates; applying one never mutates a split. */
+export function splitAlignmentCandidates(split: Split, workouts: WorkoutTemplate[], exercises: Exercise[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): RecommendationCandidate[] {
+  const evaluation = evaluateSplit(split, workouts, exercises, preferences)
+  const trace = buildTrace('adjust-split-for-priority')
+  return evaluation.priorityOpportunities.flatMap((opportunity) => {
+    const issue = opportunity.status === 'under-served' ? 'under-frequency' : opportunity.distribution === 'concentrated' ? 'concentrated-opportunities' : undefined
+    if (!issue) return []
+    const id = `split-${split.id}-${opportunity.muscle.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${issue}`
+    const reason = issue === 'under-frequency'
+      ? `${opportunity.muscle} is priority #${opportunity.rank + 1}, but this split provides ${opportunity.plannedFrequency} direct ${opportunity.plannedFrequency === 1 ? 'opportunity' : 'opportunities'} versus a bounded target of ${opportunity.desiredFrequency}.`
+      : `${opportunity.muscle} reaches its direct-opportunity target, but its planned opportunities are concentrated instead of distributed through this split.`
+    return [{ id, type: 'SPLIT' as const, splitId: split.id, muscle: opportunity.muscle, score: Math.max(3, 5 - Math.min(opportunity.rank, 2)), desiredFrequency: opportunity.desiredFrequency, plannedFrequency: opportunity.plannedFrequency, distribution: opportunity.distribution, issue, reasons: [reason, 'This is advisory: Bobby will not rewrite your split.'], trace }]
+  })
 }
 
 function assessmentFor(entries: EvaluatedWorkout[], summary: SplitEvaluation['muscleSummary'], findings: SplitFinding[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitAssessment {
