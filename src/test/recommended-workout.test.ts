@@ -18,6 +18,14 @@ const latsSession = (date = asOf): Workout => ({
   sets: [{ id: 'lat-set', exerciseId: 'lat-pulldown', setType: 'working', weight: 100, reps: 8 }],
 })
 
+const session = (id: string, date: string, exerciseId: string, reps = 8): Workout => ({
+  id,
+  date,
+  title: 'Test',
+  status: 'completed',
+  sets: [{ id: `${id}-set`, exerciseId, setType: 'working', weight: 100, reps }],
+})
+
 describe('Recommended Workout generation', () => {
   it('works without a user-created plan or split and returns an executable session', () => {
     const recommendation = generated()
@@ -39,11 +47,76 @@ describe('Recommended Workout generation', () => {
     expect(selected.some((exercise) => exercise.primaryMuscles.includes('Abs'))).toBe(true)
   })
 
+  it('uses goal-derived priorities when the user has not supplied a ranking', () => {
+    const recommendation = generated({ preferences: preferences({ goals: ['Aesthetic physique'], priorities: [] }) })
+
+    expect(recommendation.targetMuscles).toContain('Side delts')
+  })
+
   it('does not target a muscle again when it has direct working work today', () => {
     const recommendation = generated({ history: [latsSession()], preferences: preferences({ priorities: ['Lats'] }) })
 
     expect(recommendation.targetMuscles).not.toContain('Lats')
     expect(recommendation.reasons.some((reason) => reason.includes('Lats is an explicit priority'))).toBe(false)
+  })
+
+  it('deprioritizes a high-priority muscle after it has met recent direct opportunities', () => {
+    const latsHistory = [
+      latsSession('2026-09-09'),
+      latsSession('2026-09-10'),
+      latsSession('2026-09-11'),
+    ]
+    const recommendation = generated({ history: latsHistory, preferences: preferences({ priorities: ['Lats', 'Upper chest'] }) })
+
+    expect(recommendation.targetMuscles).not.toContain('Lats')
+    expect(recommendation.targetMuscles).toContain('Upper chest')
+  })
+
+  it('changes emphasis for otherwise identical users with different direct-work history', () => {
+    const preferenceInput = preferences({ priorities: ['Lats', 'Upper chest'] })
+    const neglected = generated({ preferences: preferenceInput })
+    const recentlyServed = generated({
+      preferences: preferenceInput,
+      history: [latsSession('2026-09-09'), latsSession('2026-09-10'), latsSession('2026-09-11')],
+    })
+
+    expect(neglected.targetMuscles).toContain('Lats')
+    expect(recentlyServed.targetMuscles).not.toContain('Lats')
+    expect(recentlyServed.targetMuscles).toContain('Upper chest')
+  })
+
+  it('keeps limited history conservative instead of treating one session as a complete weekly picture', () => {
+    const recommendation = generated({ history: [latsSession('2026-09-10')], preferences: preferences({ priorities: ['Lats'] }) })
+
+    expect(recommendation.targetMuscles).toContain('Lats')
+    expect(recommendation.reasons.some((reason) => reason.includes('direct history is limited'))).toBe(true)
+  })
+
+  it('avoids redundant lower-priority isolation when a selected compound already supports that muscle', () => {
+    const recommendation = generated({ preferences: preferences({ priorities: ['Lats', 'Biceps', 'Abs'] }) })
+    const selected = recommendation.workout.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)!)
+
+    expect(selected.some((exercise) => exercise.type === 'compound' && exercise.secondaryMuscles.includes('Biceps'))).toBe(true)
+    expect(selected.some((exercise) => exercise.primaryMuscles.includes('Biceps'))).toBe(false)
+    expect(recommendation.targetMuscles).toContain('Abs')
+    expect(recommendation.reasons.some((reason) => reason.includes('Biceps already receives supporting work'))).toBe(true)
+  })
+
+  it('favors a progressing exercise instead of rotating away from useful continuity', () => {
+    const recommendation = generated({
+      history: [session('row-a', '2026-09-04', 'cable-row', 8), session('row-b', '2026-09-08', 'cable-row', 9)],
+      preferences: preferences({ priorities: ['Mid back'] }),
+    })
+
+    expect(recommendation.workout.exerciseIds).toContain('cable-row')
+    expect(recommendation.reasons.some((reason) => reason.includes('Kept Seated Cable Row because its recent working-set performance is progressing.'))).toBe(true)
+  })
+
+  it('allocates more working sets to a justified highest-priority direct target', () => {
+    const recommendation = generated({ preferences: preferences({ priorities: ['Lats'] }) })
+    const planned = recommendation.workout.plannedExercises?.find((exercise) => exercises.find((item) => item.id === exercise.exerciseId)?.primaryMuscles.includes('Lats'))
+
+    expect(planned?.sets).toBeGreaterThan(exercises.find((exercise) => exercise.id === planned?.exerciseId)!.defaultSets)
   })
 
   it('respects unavailable equipment and hard exercise exclusions', () => {

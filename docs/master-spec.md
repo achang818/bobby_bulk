@@ -167,6 +167,13 @@ exercise catalog. It can operate with zero plans and no split. Split evaluation
 continues to assess user-owned recurring structure; automatic split generation
 is outside this scope.
 
+Its decision order is intentional: **goals** establish what matters,
+**priorities** establish what matters more, direct working-set **history**
+establishes what has already happened, current training-state features establish
+what is appropriate now, and today's **context** establishes what is possible.
+Exercise intelligence then realizes that allocation while avoiding redundant
+secondary-muscle isolation and preserving a progressing exercise when practical.
+
 Example:
 
 > ## Today's Recommendation
