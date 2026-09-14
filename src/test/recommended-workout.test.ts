@@ -18,12 +18,12 @@ const latsSession = (date = asOf): Workout => ({
   sets: [{ id: 'lat-set', exerciseId: 'lat-pulldown', setType: 'working', weight: 100, reps: 8 }],
 })
 
-const session = (id: string, date: string, exerciseId: string, reps = 8): Workout => ({
+const session = (id: string, date: string, exerciseId: string, reps = 8, workingSets = 1): Workout => ({
   id,
   date,
   title: 'Test',
   status: 'completed',
-  sets: [{ id: `${id}-set`, exerciseId, setType: 'working', weight: 100, reps }],
+  sets: Array.from({ length: workingSets }, (_, index) => ({ id: `${id}-set-${index}`, exerciseId, setType: 'working' as const, weight: 100, reps })),
 })
 
 describe('Recommended Workout generation', () => {
@@ -92,14 +92,47 @@ describe('Recommended Workout generation', () => {
     expect(recommendation.reasons.some((reason) => reason.includes('direct history is limited'))).toBe(true)
   })
 
-  it('avoids redundant lower-priority isolation when a selected compound already supports that muscle', () => {
-    const recommendation = generated({ preferences: preferences({ priorities: ['Lats', 'Biceps', 'Abs'] }) })
+  it('adds direct isolation when a compound leaves a lower-priority muscle with meaningful remaining need', () => {
+    const recommendation = generated({ preferences: preferences({ priorities: ['Lats', 'Biceps', 'Abs'] }), todaysContext: context({ unavailableEquipment: ['pull-up-bar'] }) })
+    const selected = recommendation.workout.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)!)
+
+    expect(selected.some((exercise) => exercise.type === 'compound' && exercise.secondaryMuscles.includes('Biceps'))).toBe(true)
+    expect(selected.some((exercise) => exercise.type === 'isolation' && exercise.primaryMuscles.includes('Biceps'))).toBe(true)
+    expect(recommendation.reasons.some((reason) => reason.includes('supporting Biceps work'))).toBe(true)
+  })
+
+  it('can omit lower-priority isolation when supporting work and recent direct workload cover its remaining allocation', () => {
+    const bicepsHistory = [session('curl-a', '2026-09-10', 'dumbbell-curl', 8, 6)]
+    const recommendation = generated({ history: bicepsHistory, preferences: preferences({ priorities: ['Lats', 'Biceps'] }), todaysContext: context({ unavailableEquipment: ['pull-up-bar'] }) })
     const selected = recommendation.workout.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)!)
 
     expect(selected.some((exercise) => exercise.type === 'compound' && exercise.secondaryMuscles.includes('Biceps'))).toBe(true)
     expect(selected.some((exercise) => exercise.primaryMuscles.includes('Biceps'))).toBe(false)
-    expect(recommendation.targetMuscles).toContain('Abs')
-    expect(recommendation.reasons.some((reason) => reason.includes('Biceps already receives supporting work'))).toBe(true)
+    expect(recommendation.reasons.some((reason) => reason.includes('Biceps already has sufficient supporting work'))).toBe(true)
+  })
+
+  it('allows a top priority to receive complementary direct exercises without repeating the same role', () => {
+    const recommendation = generated({ preferences: preferences({ priorities: ['Upper chest'] }) })
+    const selected = recommendation.workout.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)!)
+    const upperChest = selected.filter((exercise) => exercise.primaryMuscles.includes('Upper chest'))
+
+    expect(upperChest).toHaveLength(2)
+    expect(new Set(upperChest.map((exercise) => exercise.type)).size).toBeGreaterThan(1)
+    expect(upperChest.map((exercise) => exercise.id)).not.toEqual(expect.arrayContaining(['incline-db-bench', 'incline-barbell-bench']))
+  })
+
+  it('uses short sessions for efficient compound coverage and adds a curl when additional time permits', () => {
+    const input = { preferences: preferences({ priorities: ['Lats', 'Biceps'] }), todaysContext: context({ unavailableEquipment: ['pull-up-bar'] }) }
+    const short = generated({ ...input, todaysContext: context({ unavailableEquipment: ['pull-up-bar'], availableMinutes: 10 }) })
+    const longer = generated(input)
+    const hasBicepsIsolation = (recommendation: ReturnType<typeof generateRecommendedWorkout>) => recommendation.workout.exerciseIds
+      .map((id) => exercises.find((exercise) => exercise.id === id)!)
+      .some((exercise) => exercise.type === 'isolation' && exercise.primaryMuscles.includes('Biceps'))
+
+    expect(short.workout.plannedExercises).toHaveLength(1)
+    expect(short.workout.exerciseIds.map((id) => exercises.find((exercise) => exercise.id === id)!).some((exercise) => exercise.type === 'compound' && exercise.secondaryMuscles.includes('Biceps'))).toBe(true)
+    expect(hasBicepsIsolation(short)).toBe(false)
+    expect(hasBicepsIsolation(longer)).toBe(true)
   })
 
   it('favors a progressing exercise instead of rotating away from useful continuity', () => {

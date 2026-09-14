@@ -171,8 +171,16 @@ Its decision order is intentional: **goals** establish what matters,
 **priorities** establish what matters more, direct working-set **history**
 establishes what has already happened, current training-state features establish
 what is appropriate now, and today's **context** establishes what is possible.
-Exercise intelligence then realizes that allocation while avoiding redundant
-secondary-muscle isolation and preserving a progressing exercise when practical.
+Exercise intelligence then realizes that allocation while preserving a
+progressing exercise when practical. Secondary involvement from compound
+movements contributes to a muscle's session workload but does not automatically
+satisfy its desired training stimulus. Bobby distinguishes direct historical
+working-set volume (used for frequency, recovery, and exposure) from supporting
+overlap accumulated in today's selected workout. It accounts for that overlap,
+then adds direct isolation work when the remaining priority, recent direct
+volume, recovery, and time considerations justify it. Any weighting of
+supporting work is a modest coaching heuristic for relative allocation, not an
+exact physiological measurement.
 
 Example:
 

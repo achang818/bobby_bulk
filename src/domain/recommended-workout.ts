@@ -2,6 +2,7 @@ import { MINUTES_PER_EXERCISE_TRANSITION, MINUTES_PER_WORKING_SET } from './adap
 import { equipmentTagFor } from './equipment'
 import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { hasHypertrophyGoal, resolveMusclePriorities, sameMuscle } from './muscle-priorities'
+import { SECONDARY_SET_CONTRIBUTION, stimulusForMuscle, workoutMuscleStimulus } from './muscle-stimulus'
 import { classifyPreference } from './states'
 import { createPlannedExercise } from './workout-session'
 import type { AvailableLoad, Exercise, ExerciseFeatures, MuscleFeatures, PlanningAuthority, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
@@ -34,7 +35,7 @@ type MuscleTarget = {
   reason: string
   score: number
 }
-type SelectedExercise = { exercise: Exercise; target: MuscleTarget; reason?: string }
+type SelectedExercise = { exercise: Exercise; target: MuscleTarget; sets: number; reason?: string }
 type SelectionResult = { selected: SelectedExercise[]; reasons: string[] }
 
 /**
@@ -144,43 +145,90 @@ function fallbackTargets(input: RecommendedWorkoutInput, asOf: string, limit: nu
   return uniqueTargets(targets).sort((left, right) => right.score - left.score || left.rank - right.rank).slice(0, limit)
 }
 
+/**
+ * Greedily adds the exercise with the most useful remaining priority coverage.
+ * Historical features remain direct-only; this loop only credits supporting
+ * overlap accumulated by exercises selected for today's workout.
+ */
 function selectExercises(targets: MuscleTarget[], input: RecommendedWorkoutInput, asOf: string, limit: number): SelectionResult {
   const selectedIds = new Set<string>()
   const selected: SelectedExercise[] = []
   const reasons: string[] = []
-  for (const target of targets) {
-    if (selected.length >= limit) break
-    // A compound chosen for a more important target already supplies secondary
-    // stimulus. Do not add a lower-priority isolation slot just because that
-    // secondary muscle also appears in the ranking.
-    if (target.rank > 0 && hasCompoundSecondarySupport(target.muscle, selected)) {
-      reasons.push(`${target.muscle} already receives supporting work from an earlier compound, so Bobby did not add redundant direct isolation work.`)
-      continue
-    }
-    const candidates = input.exercises
-      .filter((exercise) => !selectedIds.has(exercise.id)
-        && exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle))
-        && isAvailable(exercise, input.todaysContext, input.preferences)
-        && matchesGoals(exercise, input.preferences))
-      .sort((left, right) => exerciseSelectionOrder(left, right, input, asOf))
-    const exercise = candidates[0]
-    if (!exercise) {
-      reasons.push(`No available, goal-compatible direct exercise was found for ${target.muscle}.`)
-      continue
-    }
-    selectedIds.add(exercise.id)
+  while (selected.length < limit) {
+    const stimulus = workoutMuscleStimulus(selected)
+    const choice = chooseNextExercise(targets, selected, selectedIds, stimulus, input, asOf)
+    if (!choice) break
+    const { exercise, target } = choice
+    const sets = allocatedSets({ exercise, target })
+    const supportingCompound = selected.find(({ exercise: selectedExercise }) => selectedExercise.type === 'compound' && selectedExercise.secondaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)))
     const features = calculateExerciseFeatures(exercise, input.history, asOf)
+    selectedIds.add(exercise.id)
     selected.push({
-      exercise,
-      target,
-      ...(features.progressionState === 'progressing' ? { reason: `Kept ${exercise.name} because its recent working-set performance is progressing.` } : {}),
+      exercise, target, sets,
+      ...(supportingCompound && !selected.some((item) => item.exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)))
+        ? { reason: `${supportingCompound.exercise.name} provides supporting ${target.muscle} work, but ${target.muscle} remains a high priority, so ${exercise.name} was added.` }
+        : features.progressionState === 'progressing'
+          ? { reason: `Kept ${exercise.name} because its recent working-set performance is progressing.` }
+          : {}),
     })
+  }
+  const finalStimulus = workoutMuscleStimulus(selected)
+  for (const target of targets) {
+    const current = stimulusForMuscle(finalStimulus, target.muscle)
+    if (current.directSets === 0 && current.secondarySets > 0 && remainingNeed(target, current.effectiveContribution) < MINIMUM_USEFUL_REMAINING_STIMULUS) {
+      reasons.push(`${target.muscle} already has sufficient supporting work for today's allocation, so Bobby did not add direct isolation work.`)
+    }
   }
   return { selected, reasons }
 }
 
-function hasCompoundSecondarySupport(muscle: string, selected: SelectedExercise[]) {
-  return selected.some(({ exercise }) => exercise.type === 'compound' && exercise.secondaryMuscles.some((secondary) => sameMuscle(secondary, muscle)))
+// Below this, another normal exercise default would only be token volume.
+const MINIMUM_USEFUL_REMAINING_STIMULUS = 0.5
+
+function chooseNextExercise(targets: MuscleTarget[], selected: SelectedExercise[], selectedIds: Set<string>, stimulus: ReturnType<typeof workoutMuscleStimulus>, input: RecommendedWorkoutInput, asOf: string) {
+  const candidates = input.exercises
+    .filter((exercise) => !selectedIds.has(exercise.id) && isAvailable(exercise, input.todaysContext, input.preferences) && matchesGoals(exercise, input.preferences))
+    .flatMap((exercise) => targets
+      .filter((target) => exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle))
+        && remainingNeed(target, stimulusForMuscle(stimulus, target.muscle).effectiveContribution) >= MINIMUM_USEFUL_REMAINING_STIMULUS
+        && !isRedundantForTarget(exercise, target, selected))
+      .map((target) => ({ exercise, target })))
+  if (!candidates.length) return undefined
+  return candidates.sort((left, right) => exerciseUtility(right.exercise, right.target, targets, stimulus) - exerciseUtility(left.exercise, left.target, targets, stimulus)
+    || exerciseSelectionOrder(left.exercise, right.exercise, input, asOf)
+    || left.target.rank - right.target.rank)[0]
+}
+
+function exerciseUtility(exercise: Exercise, primaryTarget: MuscleTarget, targets: MuscleTarget[], stimulus: ReturnType<typeof workoutMuscleStimulus>) {
+  const sets = allocatedSets({ exercise, target: primaryTarget })
+  return targets.reduce((total, target) => {
+    const direct = exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)) ? sets : 0
+    const supporting = exercise.secondaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)) ? sets * SECONDARY_SET_CONTRIBUTION : 0
+    const useful = Math.min(remainingNeed(target, stimulusForMuscle(stimulus, target.muscle).effectiveContribution), direct + supporting)
+    // Priority ordering stays dominant; broad compound coverage breaks ties
+    // between otherwise useful choices rather than displacing the top target.
+    return total + Math.max(0, useful) * (1000 / (1 + Math.min(target.rank, 20)))
+  }, 0)
+}
+
+function desiredSessionStimulus(target: MuscleTarget) {
+  // This starts from catalog defaults and relative priority weighting rather
+  // than a universal weekly volume prescription. Recent direct history only
+  // scales today's remaining allocation; it is never recast as secondary work.
+  const rankEmphasis = target.rank === 0 ? 1.7 : target.rank < 3 ? 1.25 : 1
+  const recentDirectAdjustment = target.features.volumeState === 'moderate recent volume' ? 0.65 : 1
+  return 3 * target.volumeWeight * rankEmphasis * recentDirectAdjustment
+}
+
+function remainingNeed(target: MuscleTarget, contributedStimulus: number) {
+  return Math.max(0, desiredSessionStimulus(target) - contributedStimulus)
+}
+
+function isRedundantForTarget(candidate: Exercise, target: MuscleTarget, selected: SelectedExercise[]) {
+  return selected.some(({ exercise }) => exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle))
+    && exercise.type === candidate.type
+    && exercise.movementPattern === candidate.movementPattern
+    && exercise.primaryAction === candidate.primaryAction)
 }
 
 function exerciseSelectionOrder(left: Exercise, right: Exercise, input: RecommendedWorkoutInput, asOf: string) {
@@ -208,7 +256,7 @@ function fitToTime(selected: SelectedExercise[], availableMinutes: number | unde
     .sort((left, right) => Number(right.exercise.type === 'compound') - Number(left.exercise.type === 'compound') || left.target.rank - right.target.rank || left.exercise.name.localeCompare(right.exercise.name))
     .map((item, order) => ({
       ...createPlannedExercise(item.exercise.id, order, item.exercise),
-      sets: allocatedSets(item),
+      sets: item.sets,
       targetRank: item.target.rank,
     }))
   if (availableMinutes === undefined) return planned.map(({ targetRank: _targetRank, ...exercise }) => exercise)
@@ -228,7 +276,7 @@ function fitToTime(selected: SelectedExercise[], availableMinutes: number | unde
   return planned.map(({ targetRank: _targetRank, ...exercise }) => exercise)
 }
 
-function allocatedSets({ exercise, target }: SelectedExercise) {
+function allocatedSets({ exercise, target }: Pick<SelectedExercise, 'exercise' | 'target'>) {
   const weightedDefault = Math.round(exercise.defaultSets * target.volumeWeight)
   if (target.features.volumeState === 'high recent volume') return Math.max(1, Math.min(exercise.defaultSets, weightedDefault - 1))
   if (target.desiredFrequency > 0 && target.features.frequency7Days >= target.desiredFrequency) return Math.max(1, Math.min(exercise.defaultSets, weightedDefault))
@@ -236,8 +284,8 @@ function allocatedSets({ exercise, target }: SelectedExercise) {
 }
 
 function targetLimit(availableMinutes: number | undefined) {
-  if (availableMinutes === undefined) return 3
-  return Math.max(1, Math.min(3, Math.floor((availableMinutes + 2) / 8)))
+  if (availableMinutes === undefined) return 4
+  return Math.max(1, Math.min(4, Math.floor((availableMinutes + 2) / 8)))
 }
 
 function estimateMinutes(planned: { sets: number }[]) { return planned.reduce((total, item) => total + item.sets * MINUTES_PER_WORKING_SET, 0) + planned.length * MINUTES_PER_EXERCISE_TRANSITION }
