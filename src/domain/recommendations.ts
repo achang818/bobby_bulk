@@ -34,7 +34,7 @@ export function generateRecommendations(input: RecommendationInput): Recommendat
     .map(({ exerciseId }) => exerciseId)
   const userOwnsPlan = input.authority !== 'recommended'
   const candidates: RecommendationCandidate[] = [
-    ...(userOwnsPlan ? evaluatePlan(plan, exercises, history, preferences, asOf, availableLoads, decisions) : []),
+    ...(userOwnsPlan ? evaluatePlan(plan, exercises, history, preferences, asOf, availableLoads, decisions, todaysContext) : []),
     ...adaptWorkout(plan, exercises, todaysContext, preferences),
     ...adaptWorkoutForTime(plan, exercises, todaysContext.availableMinutes, goalCriticalExerciseIds),
     ...(userOwnsPlan && input.split && input.splitWorkouts ? splitAlignmentCandidates(input.split, input.splitWorkouts, exercises, preferences) : []),

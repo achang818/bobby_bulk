@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { clearActiveWorkoutSession, deleteProgram, deleteSplit, loadActiveWorkoutSession, loadPrograms, loadSplits, loadWorkouts, mergeWorkoutSessions, persistWorkouts, saveActiveWorkoutSession, saveProgram, saveSplit, saveWorkout } from '../domain/storage'
 import type { Program, Split, Workout, WorkoutSession } from '../domain/models'
+import { completeWorkoutSession, sessionExercises } from '../domain/workout-session'
 
 const workout = (id: string, date: string, title: string, exerciseId: string): Workout => ({
   id, date, title, unit: 'lb', status: 'completed',
@@ -60,6 +61,17 @@ describe('program and split storage', () => {
 })
 
 describe('workout persistence', () => {
+  it('keeps added movements separate from the starting prescription across resume and completion', () => {
+    const active: WorkoutSession = { id: 'snapshot', date: '2026-09-13', title: 'Generated', status: 'in-progress', unit: 'kg', planningAuthority: 'recommended', plannedExercises: [{ exerciseId: 'lat-pulldown', order: 0, sets: 2, repRange: { min: 6, max: 9 }, setType: 'working' }], addedExercises: [{ exerciseId: 'cable-row', order: 1, sets: 3, repRange: { min: 8, max: 12 }, setType: 'working' }], sets: [{ id: 'set', exerciseId: 'cable-row', setType: 'working', weight: 50, reps: 10 }] }
+    saveActiveWorkoutSession(active)
+    const resumed = loadActiveWorkoutSession()!
+    expect(resumed).toMatchObject(active)
+    expect(sessionExercises(resumed).map((item) => item.exerciseId)).toEqual(['lat-pulldown', 'cable-row'])
+    saveWorkout(completeWorkoutSession(resumed), [])
+    expect(loadWorkouts()[0]).toMatchObject({ ...active, status: 'completed' })
+    expect(loadWorkouts()[0].plannedExercises).toHaveLength(1)
+  })
+
   it('reloads completed workouts and never duplicates a saved session', () => {
     const completed = workout('completed', '2026-09-10', 'Pull', 'lat-pulldown')
     saveWorkout(completed, [])

@@ -25,18 +25,21 @@ export type EquipmentTag = 'dumbbells' | 'barbells' | 'cables' | 'machines' | 'b
 
 export interface AvailableLoad {
   equipment: EquipmentTag
+  /** Absolute available weights, not step sizes. Legacy gym lists are pounds. */
   increments: number[]
+  unit?: WeightUnit
 }
 
 export interface Gym {
   id: string
   name: string
   equipment: EquipmentTag[]
-  availableLoads?: AvailableLoad[]
 }
 
 export interface TodaysContext {
   gymId: string
+  /** Resolved from the gym profile. Absent legacy contexts impose no inventory limit. */
+  availableEquipment?: EquipmentTag[]
   unavailableEquipment: EquipmentTag[]
   availableMinutes?: number
 }
@@ -58,6 +61,20 @@ export interface LoggedSet {
 
 export type SetType = 'warm-up' | 'working' | 'drop' | 'failure'
 
+/** Frozen guidance; actual logged weights never overwrite this prescription. */
+export type ExerciseLoadRecommendation = {
+  kind: 'target'
+  weight: number
+  unit: WeightUnit
+  action: 'increase-weight' | 'progress-reps'
+  confidence: 'high' | 'medium' | 'low'
+  reason: string
+} | {
+  kind: 'choose-load'
+  unit: WeightUnit
+  reason: string
+}
+
 export interface PlannedExercise {
   exerciseId: string
   order: number
@@ -66,6 +83,7 @@ export interface PlannedExercise {
   setType: SetType
   groupId?: string
   notes?: string
+  loadRecommendation?: ExerciseLoadRecommendation
 }
 
 export interface WorkoutSession {
@@ -79,10 +97,16 @@ export interface WorkoutSession {
   completedAt?: string
   notes?: string
   unit?: WeightUnit
+  /** Snapshot used for session coaching; later gym edits apply to future sessions. */
+  gym?: Gym
+  context?: TodaysContext
+  adaptationNotes?: string[]
   /** Whether this session came from Bobby's generated workout or a user-owned plan. */
   planningAuthority?: PlanningAuthority
   /** Snapshot of the plan when the session began; legacy history has none. */
   plannedExercises?: PlannedExercise[]
+  /** Movements added during logging; they do not rewrite the original prescription. */
+  addedExercises?: PlannedExercise[]
   sets: LoggedSet[]
 }
 
@@ -169,6 +193,7 @@ export interface ExerciseCandidate {
 }
 
 export interface ExerciseCandidateConstraints {
+  availableEquipment?: EquipmentTag[]
   unavailableEquipment?: EquipmentTag[]
   excludedExerciseIds?: readonly string[]
   requireSameCategory?: boolean

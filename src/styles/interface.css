@@ -164,6 +164,23 @@ main:focus { outline: none; }
 .history-add-set input { min-width: 0; width: 100%; padding: 10px; border: 1px solid var(--line); background: #fafbf7; color: var(--ink); }
 .history-state-summary, .history-plan-comparison { border-radius: 9px; font-size: 12px; line-height: 1.6; }
 .history-show-more { font: 600 12px 'Manrope', sans-serif; text-transform: none; letter-spacing: 0; border-radius: 8px; }
+.workout-summary { padding: 26px; margin-bottom: 24px; background: #fff; border: 1px solid #d6e3cb; border-radius: 14px; }
+.workout-summary .section-heading { align-items: start; margin-bottom: 20px; }
+.workout-summary .section-heading h2 { font-size: clamp(19px, 2vw, 24px); line-height: 1.4; }
+.summary-check { display: grid; place-items: center; flex-shrink: 0; width: 36px; height: 36px; background: #edf4e4; color: var(--accent); border-radius: 50%; }
+.summary-metrics { display: flex; flex-wrap: wrap; gap: 12px 28px; padding: 15px 18px; background: #f4f7ef; border-radius: 9px; font-size: 12px; color: var(--muted); }
+.summary-metrics strong { font-size: 17px; color: var(--ink); margin-right: 4px; }
+.summary-note { font-size: 13px; line-height: 1.7; color: var(--muted); margin: 18px 0; }
+.summary-highlights { display: grid; gap: 12px; margin: 18px 0; }
+.summary-finding { border-left: 3px solid #a9c78d; padding-left: 13px; font-size: 13px; }
+.summary-finding.watch { border-color: #c8a765; }
+.summary-finding p, .summary-next p { font-size: 13px; color: var(--muted); line-height: 1.7; margin: 5px 0 0; }
+.summary-details { border-top: 1px solid var(--line); margin-top: 18px; }
+.summary-details > summary { padding: 14px 0; min-height: 44px; color: var(--accent); font-size: 13px; font-weight: 600; }
+.summary-exercise { display: grid; gap: 5px; padding: 15px 0; border-top: 1px solid var(--line); font-size: 13px; }
+.summary-exercise span, .summary-exercise p, .summary-exercise small { margin: 0; font-size: 12px; line-height: 1.7; color: var(--muted); }
+.summary-next { margin-top: 5px; border-top: 1px solid var(--line); padding-top: 18px; font-size: 13px; }
+@media (max-width: 760px) { .workout-summary { padding: 20px; } .summary-metrics { flex-direction: column; gap: 10px; } }
 .plan-builder label, .bodyweight-field { font: 600 12px 'Manrope', sans-serif; text-transform: none; letter-spacing: 0; }
 .plan-builder input, .plan-builder select, .bodyweight-field input { font-size: 14px; border-radius: 8px; background: #fafbf7; }
 .plan-builder .input-row { grid-template-columns: repeat(2, minmax(0, 1fr)); margin-bottom: 20px; }
@@ -299,6 +316,35 @@ main:focus { outline: none; }
   .history-set-row { grid-template-columns: minmax(0, 1fr) 61px 50px 19px; gap: 5px; }
   .history-set-row input { font-size: 16px; padding: 6px; }
 }
+.load-target { display: flex; flex-direction: column; align-items: flex-start; gap: 5px; padding: 10px 12px; border-radius: 9px; background: var(--surface-soft, #f2f5ed); }
+.load-target > strong { color: var(--ink, #24372c); font-size: 12px; }
+.load-target > span { color: var(--muted, #5e6b61); font-size: 12px; line-height: 1.5; }
+.today-plan-row > .load-target { grid-column: 2 / -1; }
+.logger-set-entry > .load-target { margin-bottom: 12px; }
+.summary-exercise > .load-target { margin-top: 8px; }
+.session-size-note { margin: 8px 0 16px; padding: 12px; border-radius: 9px; background: #f2f5ed; color: #45564b; font-size: 13px; line-height: 1.5; }
+.gym-manager { margin-top: 18px; border-top: 1px solid var(--line); padding-top: 16px; }
+.gym-manager summary { cursor: pointer; font-size: 13px; font-weight: 600; }
+.gym-profile-list > div { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.gym-profile-list span { min-width: 0; overflow-wrap: anywhere; }
+.gym-profile-list strong, .gym-profile-list small { display: block; font-size: 12px; }
+.gym-profile-list small { color: #5e6b61; margin-top: 3px; }
+.gym-manager > .secondary-button { margin-top: 12px; }
+.gym-form { display: grid; gap: 16px; margin-top: 16px; }
+.gym-form label { display: grid; gap: 6px; font-size: 12px; }
+.gym-form input:not([type=checkbox]), .gym-form select { min-width: 0; width: 100%; box-sizing: border-box; padding: 10px; border: 1px solid var(--line); background: #fafbf7; color: var(--ink); }
+.gym-equipment { display: grid; gap: 10px; margin: 0; padding: 12px; border: 1px solid var(--line); border-radius: 9px; min-width: 0; }
+.gym-equipment legend { font-size: 12px; padding: 0 5px; }
+.gym-equipment label { display: flex; align-items: center; }
+.gym-equipment input { flex: 0 0 auto; }
+.gym-form-actions { display: flex; align-items: center; gap: 16px; }
+.gym-error { color: #8b3127; font-size: 12px; margin: 0; }
+.equipment-options legend.sr-only { width: 1px; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; }
 }
+
+.today-plan-row > .exercise-skip { grid-column: 2 / -1; justify-self: start; min-height: 36px; text-align: left; white-space: normal; }
+.exercise-choice-status p { font-size: 13px; line-height: 1.6; color: var(--muted); }
+.exercise-choice-status p:empty { display: none; }
+.exercise-choice-status > button { margin-bottom: 12px; }

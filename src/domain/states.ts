@@ -232,7 +232,7 @@ function comparePrescription(previous: ExercisePerformance, current: ExercisePer
   // does not by itself establish a decline.
   if (hasIncompatibleRepPrescription(previous, current) || previous.plannedSets === undefined || current.plannedSets === undefined) return 'unchanged'
   if (current.plannedSets >= previous.plannedSets && (current.targetRangeWorkingSets > previous.targetRangeWorkingSets || (current.prescriptionAchieved && previous.prescriptionAchieved === false))) return 'improved'
-  if (current.plannedSets <= previous.plannedSets && (current.targetRangeWorkingSets < previous.targetRangeWorkingSets || (previous.prescriptionAchieved && current.prescriptionAchieved === false))) return 'worse'
+  if (current.plannedSets === previous.plannedSets && current.completedWorkingSets >= current.plannedSets && (current.targetRangeWorkingSets < previous.targetRangeWorkingSets || (previous.prescriptionAchieved && current.prescriptionAchieved === false))) return 'worse'
   return 'unchanged'
 }
 

@@ -1,4 +1,4 @@
-import { equipmentTagFor } from './equipment'
+import { isExerciseAvailable } from './equipment'
 import { sameMuscle } from './muscle-priorities'
 import { classifyPreference } from './states'
 import type { Exercise, ExerciseCandidate, ExerciseCandidateRequest, ExerciseCompatibility, ExerciseRole, ExerciseSimilarity, TrainingGoal } from './models'
@@ -44,7 +44,7 @@ export function evaluateExerciseCandidate(request: Omit<ExerciseCandidateRequest
     excludedExerciseIds: request.preferences?.excludedExerciseIds ?? [],
     dislikedExerciseIds: request.preferences?.dislikedExerciseIds ?? [],
   }, request.decisions)
-  const equipmentMatch = !request.constraints?.unavailableEquipment?.includes(equipmentTagFor(candidate))
+  const equipmentMatch = isExerciseAvailable(candidate, request.constraints ?? {})
   const explicitlyExcluded = request.constraints?.excludedExerciseIds?.includes(candidate.id) ?? false
   const roleMatch = preservesRole(request.exercise, candidate, role) ? 'preserved' : 'changed'
   const muscleMatch = similarity.directPrimaryMuscleOverlap.length ? 'direct' : similarity.supportingMuscleOverlap.length ? 'supporting-only' : 'none'

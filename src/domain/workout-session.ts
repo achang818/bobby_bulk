@@ -1,4 +1,6 @@
-import type { Exercise, LoggedSet, Recommendation, PlannedExercise, SetType, WorkoutSession, WorkoutTemplate } from './models'
+import type { Exercise, Gym, LoggedSet, Recommendation, PlannedExercise, SetType, TodaysContext, WeightUnit, WorkoutSession, WorkoutTemplate } from './models'
+import { contextForGym } from './gyms'
+import { displayWeight } from './units'
 
 const defaultRepRange = { min: 8, max: 12 }
 
@@ -21,9 +23,14 @@ export function synchronizePlan(plan: WorkoutTemplate, exercises: Exercise[] = [
 export function resolveWorkoutForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[] = []): WorkoutTemplate {
   const resolved = plannedExercisesFor(plan, exercises)
     .flatMap((planned) => {
-      const recommendation = recommendations.find((item) => item.target.kind === 'exercise' && item.target.exerciseId === planned.exerciseId && ['REPLACE', 'REMOVE', 'MODIFY'].includes(item.type))
-      if (recommendation?.type === 'REMOVE') return []
-      return [{ ...planned, ...(recommendation?.change.kind === 'replace' ? { exerciseId: recommendation.change.toExerciseId } : {}), ...(recommendation?.change.kind === 'modify' && recommendation.change.changes.sets !== undefined ? { sets: recommendation.change.changes.sets } : {}) }]
+      const applicable = recommendations.filter((item) => item.target.kind === 'exercise' && item.target.exerciseId === planned.exerciseId)
+      if (applicable.some((item) => item.change.kind === 'remove')) return []
+      const resolved = applicable.reduce((current, recommendation) => {
+        if (recommendation.change.kind === 'replace') return { ...current, exerciseId: recommendation.change.toExerciseId }
+        if (recommendation.change.kind === 'modify') return { ...current, ...recommendation.change.changes }
+        return current
+      }, planned)
+      return [{ ...resolved, repRange: { ...resolved.repRange } }]
     })
     .map((planned, order) => ({ ...planned, order }))
   return synchronizePlan({ ...plan, plannedExercises: resolved }, exercises)
@@ -64,7 +71,7 @@ export function normalizeWorkoutTemplate(value: unknown, exercises: Exercise[] =
   }, exercises)
 }
 
-export function createWorkoutSession(workout: WorkoutTemplate, plannedExercises = workout.plannedExercises ?? []): WorkoutSession {
+export function createWorkoutSession(workout: WorkoutTemplate, plannedExercises = plannedExercisesFor(workout), unit?: WeightUnit): WorkoutSession {
   const now = new Date().toISOString()
   return {
     id: crypto.randomUUID(),
@@ -73,15 +80,44 @@ export function createWorkoutSession(workout: WorkoutTemplate, plannedExercises 
     title: workout.name,
     status: 'in-progress',
     startedAt: now,
-    unit: undefined,
-    ...(workout.planningAuthority === undefined ? {} : { planningAuthority: workout.planningAuthority }),
-    plannedExercises: plannedExercises.map((exercise) => ({ ...exercise })),
+    unit,
+    planningAuthority: workout.planningAuthority ?? 'user-plan',
+    plannedExercises: plannedExercises.map((exercise) => ({ ...exercise, repRange: { ...exercise.repRange }, ...(exercise.loadRecommendation ? { loadRecommendation: { ...exercise.loadRecommendation } } : {}) })),
     sets: [],
   }
 }
 
 export function completeWorkoutSession(session: WorkoutSession): WorkoutSession {
   return { ...session, status: 'completed', completedAt: new Date().toISOString() }
+}
+
+export function captureSessionGym(session: WorkoutSession, gym: Gym, context: TodaysContext): WorkoutSession {
+  return { ...session, gym: structuredClone(gym), context: structuredClone(contextForGym(context, gym)) }
+}
+
+/** Shared app boundary: resolve contextual changes, then capture that exact session. */
+export function createWorkoutSessionForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[], unit: WeightUnit): WorkoutSession {
+  return createWorkoutSession(resolveWorkoutForToday(plan, recommendations, exercises), undefined, unit)
+}
+
+/** Logging can include extra movements while the starting prescription stays intact. */
+export function sessionExercises(session: WorkoutSession): PlannedExercise[] {
+  return [...(session.plannedExercises ?? []), ...(session.addedExercises ?? [])]
+}
+
+/** Actual session choices take precedence; an unknown target leaves the input empty. */
+export function sessionLoadInput(session: WorkoutSession, exerciseId: string, unit: WeightUnit): string | undefined {
+  const latest = session.sets.filter((set) => set.exerciseId === exerciseId).at(-1)
+  if (latest) return String(displayWeight(latest.weight, session.unit, unit))
+  const target = sessionExercises(session).find((exercise) => exercise.exerciseId === exerciseId)?.loadRecommendation
+  if (!target) return undefined
+  return target.kind === 'target' ? String(displayWeight(target.weight, target.unit, unit)) : ''
+}
+
+export function compareWorkoutChronology(left: WorkoutSession, right: WorkoutSession): number {
+  return left.date.localeCompare(right.date)
+    || (left.completedAt ?? left.startedAt ?? '').localeCompare(right.completedAt ?? right.startedAt ?? '')
+    || left.id.localeCompare(right.id)
 }
 
 export function normalizeWorkoutSession(value: unknown): WorkoutSession {
@@ -97,10 +133,17 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
     ...(raw.completedAt ? { completedAt: raw.completedAt } : raw.status === 'completed' || !raw.status ? { completedAt: `${date}T00:00:00.000Z` } : {}),
     ...(raw.notes ? { notes: raw.notes } : {}),
     ...(raw.unit ? { unit: raw.unit } : {}),
-    ...(raw.planningAuthority === undefined ? {} : { planningAuthority: raw.planningAuthority }),
+    ...(raw.gym ? { gym: structuredClone(raw.gym) } : {}),
+    ...(raw.context ? { context: structuredClone(raw.context) } : {}),
+    ...(Array.isArray(raw.adaptationNotes) ? { adaptationNotes: raw.adaptationNotes.filter((note) => typeof note === 'string') } : {}),
+    planningAuthority: raw.planningAuthority ?? 'user-plan',
     plannedExercises: Array.isArray(raw.plannedExercises) ? raw.plannedExercises.map((exercise, index) => ({
       ...createPlannedExercise(exercise.exerciseId ?? '', exercise.order ?? index), ...exercise, order: exercise.order ?? index, setType: exercise.setType ?? 'working',
     })).filter((exercise) => exercise.exerciseId) : [],
+    ...(Array.isArray(raw.addedExercises) ? { addedExercises: raw.addedExercises.map((exercise, index) => ({
+      ...createPlannedExercise(exercise.exerciseId, exercise.order ?? index), ...exercise,
+      repRange: { ...(exercise.repRange ?? defaultRepRange) },
+    })).filter((exercise) => exercise.exerciseId) } : {}),
     sets: (raw.sets ?? []).map((set) => normalizeLoggedSet(set)),
   }
 }

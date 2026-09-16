@@ -1,4 +1,4 @@
-import type { LoggedSet, WeightUnit } from './models'
+import type { AvailableLoad, LoggedSet, WeightUnit } from './models'
 
 const KG_TO_LB = 2.2046226218
 
@@ -9,6 +9,15 @@ export function convertWeight(weight: number, from: WeightUnit, to: WeightUnit):
 
 export function displayWeight(weight: number, from: WeightUnit | undefined, to: WeightUnit): number {
   return roundWeight(convertWeight(weight, from ?? to, to))
+}
+
+/** Preserve a gym's physical weights when display preferences change. */
+export function availableLoadsInUnit(loads: AvailableLoad[] | undefined, unit: WeightUnit): AvailableLoad[] | undefined {
+  return loads?.map((load) => ({
+    ...load, unit,
+    increments: [...new Set(load.increments.filter((weight) => Number.isFinite(weight) && weight >= 0)
+      .map((weight) => displayWeight(weight, load.unit ?? 'lb', unit)))].sort((a, b) => a - b),
+  }))
 }
 
 export function effectiveLoad(set: LoggedSet, bodyweightLb?: number): number {

@@ -1,5 +1,5 @@
 import { buildTrace } from './rules'
-import { equipmentTagFor } from './equipment'
+import { isExerciseAvailable } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
@@ -16,7 +16,7 @@ export function findContextualSubstitute(exercise: Exercise, exercises: Exercise
 
 /** Context-specific adapter over the reusable exercise-intelligence pipeline. */
 export function findContextualCandidates(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set()): ExerciseCandidate[] {
-  if (!todaysContext.unavailableEquipment.includes(equipmentTagFor(exercise))) return []
+  if (isExerciseAvailable(exercise, todaysContext)) return []
   return findExerciseReplacement({
     originalExercise: exercise,
     reason: 'equipment-unavailable',
@@ -24,6 +24,7 @@ export function findContextualCandidates(exercise: Exercise, exercises: Exercise
     goals: preferences.goals,
     priorityMuscles: resolveMusclePriorities(preferences).orderedMuscles,
     constraints: {
+      availableEquipment: todaysContext.availableEquipment,
       unavailableEquipment: todaysContext.unavailableEquipment,
       excludedExerciseIds: [...excludedExerciseIds],
       requireSameCategory: true,
@@ -34,19 +35,22 @@ export function findContextualCandidates(exercise: Exercise, exercises: Exercise
 
 export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): ExerciseRecommendationCandidate[] {
   const traveling = defaultGymId !== undefined && todaysContext.gymId !== defaultGymId
-  const limit = traveling ? Number.POSITIVE_INFINITY : MAX_CONTEXTUAL_SUBSTITUTIONS
+  const limit = traveling || todaysContext.availableEquipment !== undefined ? Number.POSITIVE_INFINITY : MAX_CONTEXTUAL_SUBSTITUTIONS
   let substitutions = 0
   const trace = buildTrace('adapt-unavailable-equipment')
   // Preserve distinct movement slots: do not substitute in an exercise already planned today.
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const selectedSubstituteIds = new Set<string>(planExerciseIds(plan))
-  return plannedExercises.flatMap((planned) => {
+  return plannedExercises.flatMap((planned): ExerciseRecommendationCandidate[] => {
     const exerciseId = planned.exerciseId
     if (substitutions >= limit) return []
     const exercise = exercises.find((item) => item.id === exerciseId)
-    if (!exercise) return []
+    if (!exercise || isExerciseAvailable(exercise, todaysContext)) return []
     const alternative = findContextualCandidates(exercise, exercises, todaysContext, preferences, selectedSubstituteIds)[0]
-    if (!alternative) return []
+    if (!alternative) return todaysContext.availableEquipment === undefined ? [] : [{
+      id: `context-remove-${plan.id}-${exercise.id}`, type: 'REMOVE', exerciseId: exercise.id,
+      score: 6, reasons: [`${exercise.name} needs equipment unavailable at this gym today. No suitable replacement is available, so omit it for this session. Your saved plan stays unchanged.`], trace,
+    }]
     substitutions += 1
     selectedSubstituteIds.add(alternative.exercise.id)
     return [{

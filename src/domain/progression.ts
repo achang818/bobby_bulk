@@ -1,9 +1,12 @@
-import { createPlannedExercise } from './workout-session'
-import type { AvailableLoad, Exercise, LoggedSet, PlannedExercise, ProgressionRecommendation, Workout } from './models'
+import { compareWorkoutChronology, createPlannedExercise } from './workout-session'
+import { equipmentTagFor } from './equipment'
+import { convertWeight } from './units'
+import type { AvailableLoad, Exercise, LoggedSet, PlannedExercise, ProgressionRecommendation, WeightUnit, Workout } from './models'
 
 export function recommendNext(exercise: Exercise, history: Workout[], availableLoads?: AvailableLoad[]): ProgressionRecommendation
-export function recommendNext(exercise: Exercise, plannedExercise: PlannedExercise, history: Workout[], availableLoads?: AvailableLoad[]): ProgressionRecommendation
-export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExercise | Workout[], historyOrLoads?: Workout[] | AvailableLoad[], maybeLoads?: AvailableLoad[]): ProgressionRecommendation {
+export function recommendNext(exercise: Exercise, plannedExercise: PlannedExercise, history: Workout[], availableLoads?: AvailableLoad[], unit?: WeightUnit): ProgressionRecommendation
+/** History and available weights must already share the supplied display unit. */
+export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExercise | Workout[], historyOrLoads?: Workout[] | AvailableLoad[], maybeLoads?: AvailableLoad[], unit?: WeightUnit): ProgressionRecommendation {
   const planned = Array.isArray(plannedOrHistory) ? createPlannedExercise(exercise.id, 0, exercise) : plannedOrHistory
   const history = Array.isArray(plannedOrHistory) ? plannedOrHistory : historyOrLoads as Workout[]
   const availableLoads = Array.isArray(plannedOrHistory) ? historyOrLoads as AvailableLoad[] | undefined : maybeLoads
@@ -24,15 +27,16 @@ export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExerc
   if (targetRangeSets.length > 0) {
     const atTop = bestSet.reps === planned.repRange.max
     if (completedPrescription && atTop && !effort.nearFailure) {
-      const nextWeight = roundWeight(bestSet.weight + weightIncrement(bestSet.weight, exercise, availableLoads))
+      const nextWeight = roundWeight(bestSet.weight + weightIncrement(bestSet.weight, exercise, availableLoads, unit))
+      if (nextWeight <= bestSet.weight) return recommendation(exercise, planned, bestSet.weight, 'progress-reps', effort.easy ? 'high' : 'medium', ['No heavier load is available here. Keep this load and focus on controlled reps.'])
       return recommendation(exercise, planned, nextWeight, 'increase-weight', effort.easy ? 'high' : 'medium', [
-        `${formatSet(bestSet)} is your heaviest working set within the ${planned.repRange.min}-${planned.repRange.max} rep range${effort.summary}.`,
-        completedPrescription ? 'It reached the top of the range, so increasing the load slightly is reasonable.' : 'That set demonstrates a viable working load; increase slightly only if you want to progress from that top-range effort.',
+        `${formatSet(bestSet, unit)} is your heaviest working set within the ${planned.repRange.min}-${planned.repRange.max} rep range${effort.summary}.`,
+        'Your previous working set reached the top of the rep range. Try this load next.',
       ])
     }
 
     return recommendation(exercise, planned, bestSet.weight, 'progress-reps', effort.nearFailure ? 'low' : effort.easy ? 'high' : 'medium', [
-      `${formatSet(bestSet)} is your heaviest working set within the ${planned.repRange.min}-${planned.repRange.max} rep range${effort.summary}.`,
+      `${formatSet(bestSet, unit)} is your heaviest working set within the ${planned.repRange.min}-${planned.repRange.max} rep range${effort.summary}.`,
       effort.nearFailure
         ? 'Keep this demonstrated load and improve reps before increasing it.'
         : completedPrescription ? 'Keep this load and build toward the top of the range.' : `This is useful performance evidence, although only ${workingSets.length}/${planned.sets} planned working sets were completed.`,
@@ -42,7 +46,7 @@ export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExerc
   // No set reached the prescription range. A below-range set with meaningful
   // reserve is not evidence that the load must be reduced.
   return recommendation(exercise, planned, bestSet.weight, 'progress-reps', effort.nearFailure ? 'low' : effort.easy ? 'medium' : 'low', [
-    `${formatSet(bestSet)} was below the ${planned.repRange.min}-${planned.repRange.max} rep range${effort.summary}.`,
+    `${formatSet(bestSet, unit)} was outside the ${planned.repRange.min}-${planned.repRange.max} rep range${effort.summary}.`,
     effort.nearFailure
       ? 'The low-rep, near-failure effort is evidence against increasing the load; keep it steady and rebuild reps.'
       : 'The available effort evidence does not suggest the load is too heavy. Keep it steady and build into the range.',
@@ -54,7 +58,7 @@ function recommendation(exercise: Exercise, planned: PlannedExercise, weight: nu
 }
 
 function latestSets(history: Workout[], exerciseId: string): LoggedSet[] {
-  const latest = [...history].sort((a, b) => b.date.localeCompare(a.date)).find((workout) => workout.status !== 'in-progress' && workout.sets.some((set) => set.exerciseId === exerciseId))
+  const latest = [...history].sort((a, b) => compareWorkoutChronology(b, a)).find((workout) => workout.status !== 'in-progress' && workout.sets.some((set) => set.exerciseId === exerciseId && set.setType === 'working'))
   return latest?.sets.filter((set) => set.exerciseId === exerciseId) ?? []
 }
 
@@ -74,28 +78,16 @@ function effortEvidence(set: LoggedSet) {
   return { nearFailure, easy, summary }
 }
 
-function formatSet(set: LoggedSet): string { return `${set.weight} for ${set.reps}` }
+function formatSet(set: LoggedSet, unit?: WeightUnit): string { return `${set.weight}${unit ? ` ${unit}` : ''} for ${set.reps}` }
 
-function weightIncrement(weight: number, exercise: Exercise, availableLoads?: AvailableLoad[]): number {
-  const load = availableLoads?.find((item) => item.equipment === equipmentTagFor(exercise.equipment))
-  if (load?.increments.length) {
-    const next = load.increments.find((increment) => increment > weight)
+function weightIncrement(weight: number, exercise: Exercise, availableLoads?: AvailableLoad[], unit?: WeightUnit): number {
+  const load = availableLoads?.find((item) => item.equipment === equipmentTagFor(exercise))
+  if (load) {
+    const next = load.increments.filter((increment) => Number.isFinite(increment) && increment > weight).sort((a, b) => a - b)[0]
     return next === undefined ? 0 : next - weight
   }
-  if (weight <= 0) return 5
-  return weight < 50 ? 2.5 : 5
-}
-
-function equipmentTagFor(equipment: string) {
-  const normalized = equipment.toLowerCase()
-  if (normalized.includes('dumbbell')) return 'dumbbells' as const
-  if (normalized.includes('barbell')) return 'barbells' as const
-  if (normalized.includes('cable')) return 'cables' as const
-  if (normalized.includes('machine')) return 'machines' as const
-  if (normalized.includes('kettlebell')) return 'kettlebells' as const
-  if (normalized.includes('trap bar')) return 'trap-bar' as const
-  if (normalized.includes('bodyweight')) return 'bodyweight' as const
-  return 'other' as const
+  const weightLb = convertWeight(weight, unit ?? 'lb', 'lb')
+  return convertWeight(weightLb <= 0 ? 5 : weightLb < 50 ? 2.5 : 5, 'lb', unit ?? 'lb')
 }
 
 function roundWeight(weight: number): number { return Math.round(weight * 10) / 10 }

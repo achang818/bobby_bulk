@@ -1,35 +1,50 @@
-Yes. That correction makes sense: the **two-exercise limit is contextual**, not a general limit on how much Bobby can change.
-
-For example, if you're at your normal gym and everything is available, Bobby shouldn't randomly restructure half your workout. If you're traveling to a different gym with substantially different equipment, it can make more changes because the constraint warrants it.
-
-And I like the **estimated fatigue** idea. I'd make it visible but lightweight, e.g. a small indicator on the home screen rather than turning Bobby into a recovery-tracking app.
-
-I have enough now to write the full spec. I’ll treat this as a **personal app for you first**, with clean enough architecture that it could become a broader product later.
-
 # Bobby Bulk — Product & Technical Specification
+
+## How to read this specification
+
+Sections 1–43 describe product principles, domain concepts, and intended behavior;
+they are not a checklist of completed features. The product invariants below
+apply across planning modes. Sections 44–45 describe the current implementation
+and persistence approach, which can evolve without changing those invariants.
+Section 46 is the development roadmap, not a statement that every earlier phase
+is complete. Section 47 summarizes the product loop.
 
 ## 1. Product Definition
 
 **Bobby Bulk is a personal adaptive workout coach.**
 
-The user creates their own training routines and goals. Bobby uses those routines, the user's training history, current context, and evidence-based training principles to recommend what the user should do today.
+The user defines their goals, preferences, and—when desired—their own training
+structure. Bobby uses those inputs together with training history, current
+context, and evidence-informed principles to determine what the user should do
+today.
 
-Bobby can modify the user's routine, but **the user remains in control**.
+Bobby supports two planning-authority modes:
+
+* **Recommended Workout:** Bobby constructs today's session, even when no saved
+  plan or split exists.
+* **My Plans:** Bobby adapts and advises on a user-owned program without silently
+  rewriting it.
+
+In both modes, **the user remains in control**.
+
+> **Planning authority determines what Bobby may change. Training need determines what Bobby wants to do. Context determines what Bobby can do.**
 
 The core interaction is:
 
 ```text id="6xj3xj"
-My Routines
+Planning Authority + Goals / Priorities / Preferences
+      ↓
+User Plan (when applicable)
       ↓
 Today's Context
       ↓
 Training History
       ↓
-Bobby evaluates
+Bobby constructs or adapts
       ↓
 Today's Workout Recommendation
       ↓
-User accepts / rejects
+User starts / adjusts / chooses another workout
       ↓
 Workout
       ↓
@@ -42,20 +57,39 @@ Future recommendations
 
 Bobby is **not primarily an AI workout generator**.
 
-The core coaching engine is deterministic and evidence-based.
+Its defining role is ongoing, history-aware coaching. Recommended Workout is
+deterministic session construction within that coaching loop; it does not imply
+LLM-authored workouts. The core coaching engine is deterministic and
+evidence-informed.
 
 An LLM may eventually be used to interpret natural-language goals or explain recommendations, but it should not be responsible for the fundamental training decisions.
 
 ---
 
-# 2. Product Philosophy
+## 2. Product Philosophy
 
-### User owns the program
+### Product invariants
 
-Bobby should behave like a coach working with an existing athlete, rather than an app that assumes it knows best.
+* Planning authority governs what Bobby may construct or modify.
+* User-owned plans are never silently rewritten; permanent changes require
+  explicit acceptance.
+* Fundamental training decisions remain deterministic and inspectable.
+* Personal training evidence matters; one poor session or elapsed time alone
+  should not trigger unnecessary variation.
+* Context constrains a session without automatically changing a saved program.
+* Coaching should remain low-friction, with the user able to decline advice.
+
+### User controls planning authority
+
+Bobby should behave like a coach working with the user. The user may delegate
+construction of today's session or provide their own program as the baseline.
+Owning a program is optional; choosing Recommended Workout does not transfer
+ownership of any saved plans to Bobby.
 
 The user can:
 
+* Start a Recommended Workout without creating a routine
+* Choose a workout from My Plans instead
 * Create routines
 * Modify routines
 * Reject Bobby's recommendations
@@ -86,7 +120,12 @@ Variation should be recommended when there is an actual reason, such as:
 
 ---
 
-# 3. Core Hierarchy
+## 3. Core Hierarchy
+
+The hierarchy depends on planning authority. A Program or Split is not a
+prerequisite for a Recommended Workout.
+
+### User-owned structure
 
 ```text id="3t4p5c"
 Program
@@ -100,7 +139,7 @@ Exercise
 Set
 ```
 
-Example:
+Example of a user-owned structure:
 
 ```text id="2i0f6q"
 PPL
@@ -120,9 +159,24 @@ PPL
     └── ...
 ```
 
+### Recommended Workout
+
+```text
+Goals + Priorities + History + State + Context
+  ↓
+Generated Workout
+  ↓
+Exercise
+  ↓
+Set
+```
+
+Both paths produce an executable workout and a logged WorkoutSession. A
+generated session does not require or silently create a recurring program.
+
 ---
 
-# 4. User Routines
+## 4. User Routines
 
 The user should be able to create and maintain:
 
@@ -135,17 +189,22 @@ The user should be able to create and maintain:
 * Target volume
 * Exercise ordering
 
-The user-created routine is the **baseline** Bobby evaluates.
+In **My Plans**, the user-created routine is the **baseline** Bobby evaluates.
 
 Bobby should not silently rewrite it.
 
+Creating a routine is optional and is not required to use Recommended Workout.
+
 ---
 
-# 5. Today's Recommendation
+## 5. Today's Recommendation
 
 When the user opens Bobby, the home screen should present a recommended workout.
+The primary path is **Recommended Workout**, with **My Plans** available as an
+explicit alternative. The preview should describe the session the user will
+actually start, and an in-progress session should be resumable.
 
-## Planning authority
+### Planning authority
 
 Bobby supports two deliberately distinct modes:
 
@@ -167,28 +226,59 @@ exercise catalog. It can operate with zero plans and no split. Split evaluation
 continues to assess user-owned recurring structure; automatic split generation
 is outside this scope.
 
+### Recommended Workout decision order
+
 Its decision order is intentional: **goals** establish what matters,
 **priorities** establish what matters more, direct working-set **history**
 establishes what has already happened, current training-state features establish
 what is appropriate now, and today's **context** establishes what is possible.
 Exercise intelligence then realizes that allocation while preserving a
-progressing exercise when practical. Secondary involvement from compound
-movements contributes to a muscle's session workload but does not automatically
-satisfy its desired training stimulus. Bobby distinguishes direct historical
-working-set volume (used for frequency, recovery, and exposure) from supporting
-overlap accumulated in today's selected workout. It accounts for that overlap,
-then adds direct isolation work when the remaining priority, recent direct
-volume, recovery, and time considerations justify it. Any weighting of
-supporting work is a modest coaching heuristic for relative allocation, not an
-exact physiological measurement.
+progressing exercise when practical.
 
-Example:
+Compound movements contribute to the session workload of both primary and
+secondary muscles. Secondary involvement reduces remaining need but does not
+automatically satisfy it. Bobby may add direct isolation work when priority,
+recent workload, accumulated session stimulus, recovery, and available time
+indicate that more direct work is useful.
+
+### Session stimulus accounting
+
+Bobby distinguishes **direct work** from **supporting work**. Direct historical
+working-set volume remains useful for tracking frequency, recovery, and priority
+exposure, while supporting involvement from compounds contributes to the
+workout currently being constructed. Supporting work is not assumed to be
+equivalent to direct work and does not rewrite the direct historical record.
+
+Bobby should reason:
+
+```text
+desired emphasis → accumulated session stimulus → remaining useful stimulus
+```
+
+Isolation exercises may fill that remaining need. Compound overlap is neither
+ignored nor treated as an automatic prohibition on isolation work. Any weighting
+of supporting work is a modest coaching heuristic for relative allocation, not
+an exact physiological measurement.
+
+### Example: Recommended Workout
+
+> ## Your recommended session
+>
+> ### Upper chest · Mid back
+>
+> Based on your goals, priorities, recent training, and available equipment.
+>
+> Review the selected exercises and working-set prescriptions before starting.
+>
+> [Start Workout] [Why This Session?] [Browse My Plans]
+
+### Example: My Plans
 
 > ## Today's Recommendation
 >
 > ### Push
 >
-> Based on your PPL split, recent training, and performance.
+> Adapting your saved Push workout from PPL using recent training and today's context.
 >
 > **Changes**
 >
@@ -205,9 +295,15 @@ If the UI becomes crowded, it can collapse the reasoning into a more compact pre
 
 ---
 
-# 6. Workout Selection
+## 6. Workout Selection in User-Owned Programs
 
-Bobby should primarily use the user's **split** to determine what workout should be recommended.
+In **My Plans**, when the user has a split, Bobby should primarily use that
+**split** to determine which saved workout to recommend. The user can also
+select a saved workout directly without a split.
+
+This selection process applies to user-owned recurring structure. Recommended
+Workout follows the construction process in Section 5 and requires no plan or
+split.
 
 For example:
 
@@ -222,7 +318,7 @@ Pull
 
 Bobby would normally recommend Legs.
 
-However, the split is **not absolute**.
+Within My Plans, the split is **not absolute**.
 
 Bobby can consider:
 
@@ -251,7 +347,7 @@ Bobby should recommend this rather than automatically changing the program.
 
 ---
 
-# 7. Rejecting Recommendations
+## 7. Rejecting Recommendations
 
 Recommendations are **proposals**.
 
@@ -271,9 +367,12 @@ The selected workout should then become the workout being performed.
 
 ---
 
-# 8. Routine Changes
+## 8. Routine Changes
 
-Bobby can recommend changes to the actual routine.
+In **My Plans**, Bobby can recommend changes to the actual routine. In
+Recommended Workout, construction or adjustment affects the temporary session,
+not a saved routine. Starting a generated workout does not authorize permanent
+changes to a user-owned plan.
 
 Example:
 
@@ -305,7 +404,7 @@ If rejected:
 
 ---
 
-# 9. User Preferences
+## 9. User Preferences
 
 Preferences should be learned from explicit and implicit feedback.
 
@@ -341,7 +440,7 @@ A rejected recommendation can influence these preferences.
 
 ---
 
-# 10. Today's Context
+## 10. Today's Context
 
 Today's context describes what is different **today**.
 
@@ -350,7 +449,7 @@ Possible inputs:
 * Gym
 * Available equipment
 * Equipment temporarily unavailable
-* Available weights
+* Individual exercises unavailable for this workout
 * Available time
 * Other temporary constraints
 
@@ -358,7 +457,7 @@ These should not automatically modify the permanent routine.
 
 ---
 
-# 11. Gym Configuration
+## 11. Gym Configuration
 
 The user can create gym profiles.
 
@@ -382,9 +481,31 @@ The user should **not need to enumerate every individual machine**.
 
 The purpose of gym configuration is to establish a general equipment environment.
 
+Gym profiles can be created and edited from Today's context panel. Persist the
+selected gym and its equipment categories.
+An empty equipment inventory permits equipment-free bodyweight work; it does
+not mean unrestricted access. Unknown accessories are grouped explicitly under
+Other equipment rather than silently assumed present.
+
+Resolve eligibility from the selected gym's inventory minus today's temporary
+outages. Use the same rule for generated exercises, user-plan suggestions, and
+substitution candidates. Respect catalog equipment alternatives and bench
+requirements for free-weight exercises that require a bench. Temporary outages
+do not edit a profile and reset when switching gyms.
+
+If a user-plan exercise cannot be performed and no suitable replacement exists,
+explain its omission for today's session. Do not rewrite the saved plan. An
+explicitly restricted gym can require more than two substitutions or omissions;
+the contextual change guideline must not leave impossible exercises in the
+executable session. If nothing remains, explain the constraint before starting.
+
+Capture the gym and resolved context with a new session. Later profile edits,
+gym switches, and temporary outages apply to future workouts; the running
+session retains its original equipment context, prescriptions, and load guidance.
+
 ---
 
-# 12. Temporary Equipment Problems
+## 12. Temporary Equipment Problems
 
 Inside today's workout, the user can indicate that a piece of equipment is unavailable.
 
@@ -398,7 +519,7 @@ This is preferable to requiring the user to maintain a detailed database of ever
 
 ---
 
-# 13. Equipment Adaptation
+## 13. Equipment Adaptation
 
 Bobby should automatically substitute exercises when necessary.
 
@@ -425,9 +546,13 @@ The recommendation should preserve the intent of the original exercise whenever 
 
 ---
 
-# 14. Contextual Change Limit
+## 14. Contextual Change Limit
 
-The earlier "two exercise changes" rule is specifically for situations where the **environment is otherwise normal**.
+This guidance applies when adapting an existing workout, especially a user-owned
+plan. It is not a limit on how many exercises Bobby may choose when constructing
+a Recommended Workout from scratch.
+
+The "two exercise changes" guideline is specifically for situations where the **environment is otherwise normal**.
 
 If you're at the same gym and the same equipment is available:
 
@@ -447,38 +572,33 @@ The principle is:
 
 ---
 
-# 15. Available Weights
+## 15. Suggested Loads and Exercise Alternatives
 
-Bobby should know available loading increments where useful.
+Gym profiles configure equipment categories, without available-weight lists.
+Discard legacy gym weight inventories when loading profiles; they must not cap
+new recommendations. Suggest editable loads from comparable training history and
+ask the user to choose a starting load when that history is insufficient.
 
-Example:
+Before starting a Recommended Workout, each exercise offers **I can't do this
+exercise**. Replace only that slot with the next suitable alternative, preserving
+its set budget and using the replacement's rep range and load guidance. Respect
+equipment, goals, exercise exclusions, recent training, and the other movements
+in the session. Do not cycle back to an exercise already rejected in this preview.
+If no suitable alternative remains, omit that slot with a clear explanation.
 
-```text id="w7t9by"
-Dumbbells:
-20
-25
-30
-35
-40
-45
-50
-55
-60
-65
-70
-```
+Changes affect the current preview only, leaving saved plans and permanent
+preferences intact. **Reset exercise choices** restores the generated preview.
+Changes to training context, goals, or history rebuild the preview. Starting a
+workout captures the exact revised prescription, including load targets, so it
+survives reloads and remains the basis for post-workout analysis.
 
-Recommendations must respect real available loads.
-
-Bobby should not recommend:
-
-> 67.5 lb
-
-if that isn't available.
+When the catalog permits different equipment variants but historical logs do not
+identify the variant used, ask for a starting load rather than transferring a
+machine or barbell weight to a dumbbell setup.
 
 ---
 
-# 16. Time Constraints
+## 16. Time Constraints
 
 The user can specify today's available workout time.
 
@@ -492,9 +612,12 @@ Today:
 35 minutes
 ```
 
-Bobby should adapt the existing workout.
+In **My Plans**, Bobby should adapt the existing workout while preserving its
+intent. In **Recommended Workout**, Bobby should construct a session that fits
+the available time, using training need and context to allocate exercises and
+sets. Neither mode requires inventing a recurring split to fit today's time.
 
-Possible actions:
+Possible adaptations to an existing workout:
 
 * Reduce sets
 * Remove lower-priority exercises
@@ -503,11 +626,13 @@ Possible actions:
 * Preserve important compound movements
 * Preserve goal-critical exercises
 
-It should not simply generate a completely unrelated 35-minute workout.
+In My Plans, Bobby should not replace the user's workout with a completely
+unrelated 35-minute session. In Recommended Workout, time constrains useful
+stimulus allocation, including any additional isolation work.
 
 ---
 
-# 17. Goals
+## 17. Goals
 
 Initial goals should be structured and simple.
 
@@ -547,7 +672,8 @@ defaults to side delts, lats, upper chest, abs, biceps, rear delts, and mid
 back. Explicit user priorities always lead this list in their selected order;
 remaining non-duplicated defaults fill in the rest.
 
-The resolved priority order is shared by plan, split, and workout evaluation.
+The resolved priority order is shared by Recommended Workout construction and
+user-owned plan, split, and workout evaluation.
 It guides—not overrides—recovery, available training days, working volume, and
 session constraints:
 
@@ -556,17 +682,43 @@ session constraints:
 * The highest priority can target about three weekly opportunities when the
   split supports it; lower priorities commonly target fewer. These are bounded
   opportunities, not universal frequency requirements.
-* Splits are evaluated first for whether their frequency and direct volume
-  express the priority order. Bobby only suggests redistribution when the
-  mismatch is material.
+* In My Plans, saved splits are evaluated first for whether their frequency and
+  direct volume express the priority order. Bobby only suggests redistribution
+  when the mismatch is material.
 * Within a workout, a priority muscle's main productive work should generally
   receive fresher placement before lower-priority competing work when safety,
   technique, compounds, supersets, and fatigue management allow.
 
-### Goal-to-split alignment
+Recommended Workout uses resolved priorities and actual training history to
+select useful muscle opportunities without requiring planned split entries.
 
-Goals establish desired outcomes, and explicit priorities refine them. The
-saved split then establishes recurring direct training opportunities. Before
+### Complete generated sessions
+
+Priority targets guide emphasis within a session; satisfying their weekly
+frequency guidance does not automatically make a muscle ineligible. Construction
+first allocates justified priority work, then considers suitable lower-priority
+and unranked muscles. These candidates remain available even when a priority
+still needs attention. A priority deficit alone is not a complete workout plan.
+
+Use the current four-movement budget as a construction heuristic, considering
+useful direct and supporting work before each addition. Do not fill slots with
+redundant exercises or override recent-work and high-workload guards, equipment
+constraints, goals, or hard exclusions. Apply the same eligibility checks to all
+primary muscles of a candidate, including work added beyond the priorities.
+Recent direct work today or yesterday is conservatively deferred; this is an
+explicit application heuristic, not a claim about exact physiological recovery.
+
+Check the final prescription after time adaptation. When fewer than three
+suitable movements remain, explain visibly whether the time limit shortened
+the session or suitable work was limited by the current context. Three movements
+is a product threshold for this explanation, not a universal workout minimum.
+Recompute explanations and load targets from the final exercise and set allocation.
+
+### Goal-to-split alignment in My Plans
+
+When evaluating a user-owned split, goals establish desired outcomes, and
+explicit priorities refine them. The saved split then establishes recurring
+direct training opportunities. Before
 trying to repeatedly compensate inside individual workouts, Bobby evaluates
 whether the split gives each resolved priority a practical, reasonably
 distributed number of direct opportunities relative to the available split
@@ -586,7 +738,7 @@ one poor session into a programming change.
 
 ---
 
-# 18. Future Natural-Language Goals
+## 18. Future Natural-Language Goals
 
 Later, an LLM can interpret a free-form goal.
 
@@ -610,7 +762,7 @@ The LLM should not directly decide the workout.
 
 ---
 
-# 19. Evidence-Based Training Knowledge
+## 19. Evidence-Based Training Knowledge
 
 Bobby needs a structured training knowledge base derived from professional/evidence-based sources.
 
@@ -638,7 +790,7 @@ The knowledge base should distinguish between:
 
 ---
 
-# 20. Training Principle Model
+## 20. Training Principle Model
 
 ```ts id="2e4r1z"
 type TrainingPrinciple = {
@@ -672,7 +824,7 @@ type TrainingPrinciple = {
 
 ---
 
-# 21. Training Variation Principle
+## 21. Training Variation Principle
 
 Bobby should explicitly encode the idea of adaptation/variation without turning it into a simplistic rule.
 
@@ -702,7 +854,7 @@ Therefore:
 
 ---
 
-# 22. Personal Evidence Takes Priority
+## 22. Personal Evidence Takes Priority
 
 This is a major design principle.
 
@@ -735,7 +887,7 @@ with actual personal results receiving significant weight.
 
 ---
 
-# 23. Feature Calculation
+## 23. Feature Calculation
 
 Raw history becomes structured features.
 
@@ -757,7 +909,7 @@ Examples:
 
 ---
 
-# 24. Fatigue System
+## 24. Fatigue System
 
 Bobby should maintain an **under-the-hood fatigue state**.
 
@@ -793,7 +945,7 @@ The fatigue model should influence recommendations but should not pretend to kno
 
 ---
 
-# 25. Performance Anomalies
+## 25. Performance Anomalies
 
 If the user performs unusually poorly:
 
@@ -823,7 +975,7 @@ This prevents one bad day from causing unnecessary programming changes.
 
 ---
 
-# 26. Post-Workout Analysis
+## 26. Post-Workout Analysis
 
 The user does not need to interact with Bobby during the workout beyond logging.
 
@@ -839,7 +991,7 @@ This keeps the actual workout experience clean.
 
 ---
 
-# 27. Strength Benchmarks
+## 27. Strength Benchmarks
 
 Bobby should periodically conduct standardized strength benchmarks.
 
@@ -870,7 +1022,7 @@ If declined, Bobby should not treat that as a negative result.
 
 ---
 
-# 28. Benchmark Frequency
+## 28. Benchmark Frequency
 
 Benchmarks should **not occur frequently**.
 
@@ -887,7 +1039,7 @@ Their purpose is to help Bobby determine:
 
 ---
 
-# 29. Warm-Up vs Working Sets
+## 29. Warm-Up vs Working Sets
 
 Sets must explicitly distinguish their purpose.
 
@@ -927,7 +1079,7 @@ Warm-up sets should not be treated as equivalent to working sets when calculatin
 
 ---
 
-# 30. Workout UI
+## 30. Workout UI
 
 The workout screen should be heavily inspired by the usability of **Hevy**, since the desired interaction is similar.
 
@@ -951,7 +1103,7 @@ The app should pre-populate useful information from the previous workout/recomme
 
 ---
 
-# 31. Workout Logging
+## 31. Workout Logging
 
 Required:
 
@@ -977,7 +1129,7 @@ The goal is:
 
 ---
 
-# 32. No In-Workout Chat
+## 32. No In-Workout Chat
 
 Bobby should not require conversational interaction during the workout.
 
@@ -997,7 +1149,7 @@ The workout experience should remain focused on training.
 
 ---
 
-# 33. Recommendation Timing
+## 33. Recommendation Timing
 
 Bobby makes its main recommendations **before the workout**.
 
@@ -1028,16 +1180,18 @@ Analysis
 
 ---
 
-# 34. Decision Engine
+## 34. Decision Engine
 
 The fundamental system is:
 
 ```text id="a7i7sj"
-Plan
+Planning Authority
++
+Goals / Priorities
++
+User Plan (when applicable)
 +
 Today's Context
-+
-Goals
 +
 History
 +
@@ -1047,14 +1201,18 @@ Training State
 +
 Evidence-Based Rules
         ↓
-Decision Engine
+Bobby Engine
         ↓
-Recommendation
+Today's Workout / Recommendations
 ```
+
+Planning authority gates which changes are permitted. Training need determines
+the desired work, and context constrains what is feasible. A user plan is an
+input only when the selected planning mode calls for one.
 
 ---
 
-# 35. Recommendation Types
+## 35. Recommendation Types
 
 The initial vocabulary:
 
@@ -1088,7 +1246,7 @@ Cable Fly
 
 ---
 
-# 36. Recommendation Ranking
+## 36. Recommendation Ranking
 
 Multiple rules may apply simultaneously.
 
@@ -1119,7 +1277,7 @@ This prevents Bobby from treating every possible improvement as equally importan
 
 ---
 
-# 37. Recommendation Traceability
+## 37. Recommendation Traceability
 
 Every significant recommendation should be inspectable.
 
@@ -1151,7 +1309,7 @@ which is supported by:
 
 ---
 
-# 38. Deterministic Core
+## 38. Deterministic Core
 
 The core engine should not depend on an LLM.
 
@@ -1175,7 +1333,7 @@ This allows:
 
 ---
 
-# 39. Optional LLM Layer
+## 39. Optional LLM Layer
 
 Eventually:
 
@@ -1207,7 +1365,7 @@ The LLM should **not bypass the decision engine**.
 
 ---
 
-# 40. History & Analytics
+## 40. History & Analytics
 
 A separate Progress/Insights tab can show:
 
@@ -1232,7 +1390,7 @@ The primary experience is:
 
 ---
 
-# 41. Feedback Loop
+## 41. Feedback Loop
 
 Bobby should distinguish:
 
@@ -1272,7 +1430,7 @@ Bobby can recommend it again if the evidence becomes strong enough.
 
 ---
 
-# 42. No Scheduling Initially
+## 42. No Scheduling Initially
 
 Bobby does **not** create a workout calendar or force a schedule.
 
@@ -1286,7 +1444,33 @@ rather than Bobby automatically rearranging the user's entire life/training sche
 
 ---
 
-# 43. Data Model
+## 43. Data Model
+
+### Planning authority
+
+Planning authority is a first-class domain concept, not necessarily a separate
+persisted database entity:
+
+```ts
+type PlanningAuthority =
+  | 'recommended'
+  | 'user-plan';
+```
+
+It controls **what Bobby is permitted to change**, not merely how the UI is
+labeled:
+
+* `recommended` permits construction of a temporary, executable workout from
+  goals, priorities, history, state, and context, without a Program or Split.
+* `user-plan` preserves the user-owned structure as the baseline. Contextual
+  adaptations affect today's execution; permanent plan changes require explicit
+  acceptance of a supported recommendation.
+
+Workout definitions and session snapshots should retain their planning
+authority so execution and later analysis preserve that distinction. Legacy
+user plans with no explicit authority are treated as `user-plan`.
+
+### Entities and relationships
 
 Core entities:
 
@@ -1310,7 +1494,8 @@ RecommendationFeedback
 Benchmark
 ```
 
-The most important relationships:
+The most important relationships (Program and Split are optional containers
+for user-owned structure):
 
 ```text id="7q9wce"
 Program
@@ -1319,9 +1504,13 @@ Program
            └── Exercise
                 └── Set
 
+Generated Workout (no Program or Split required)
+ └── Planned Exercises / Sets
+
 WorkoutSession
- └── Workout
-      └── Actual Sets
+ ├── PlanningAuthority
+ ├── Snapshot of saved or generated workout
+ └── Actual Sets
 
 Recommendation
  ├── DecisionRule
@@ -1331,102 +1520,69 @@ Recommendation
 
 ---
 
-# 44. Current Codebase
+## 44. Current Codebase
 
-Current:
+This is an implementation snapshot, organized by responsibilities rather than
+an exhaustive file inventory. The application currently uses React and
+TypeScript, with deterministic coaching logic in the domain layer.
 
-```text id="r6r1jc"
-App.tsx
-App.css
-index.css
+| Layer | Current responsibilities |
+| --- | --- |
+| Presentation and session interaction | Today, Plans, History, Exercises, and Goals; workout preview; set logging; session resume; recommendation decisions; responsive navigation and styling. |
+| Domain model and exercise catalog | Saved workout definitions, planned prescriptions, session snapshots, planning authority, goals, preferences, gyms, and context; exercise metadata, taxonomy, and loading units. |
+| History, features, and state | Set-preserving performance evidence, exercise and muscle features, progression signals, recent workload, training state, and preference classification. |
+| Goals and muscle priorities | Resolve explicit ordered priorities and goal-derived defaults for both workout construction and user-plan evaluation. |
+| Recommended Workout construction | Select muscle opportunities from goals, history, state, and context; choose compatible exercises and working sets; account for accumulated direct and supporting session stimulus; fit the session to available time. |
+| User-plan evaluation and adaptation | Evaluate plans, individual workouts, and splits; assess priority alignment and structural coverage; adapt to equipment and time; apply accepted changes to user-owned plans. |
+| Exercise intelligence and progression | Compare exercise fit and replacement candidates, retain productive movements where practical, and base suggested loads on demonstrated performance. |
+| Recommendations and evidence | Centralized recommendation generation and ranking, decision feedback, rule traces, training principles, and evidence metadata. |
+| Persistence and verification | Browser storage, normalization of legacy records, active-session persistence, development-time local-file snapshots, and automated domain/persistence tests. A SQL schema supports a future SQLite migration. |
 
-models.ts
-exercises.ts
-templates.ts
-progression.ts
-storage.ts
-seed.ts
-schema.sql
-progression.test.ts
-```
+Recommended Workout construction and session stimulus accounting are already
+represented in the domain implementation. Automatic split generation is outside
+the current scope; a dedicated analytics experience and the optional LLM layer
+remain roadmap concerns. The presence of a domain type or roadmap phase does
+not imply that its full user-facing workflow is implemented.
 
-Recommended responsibilities:
-
-### `models.ts`
-
-All domain models/types.
-
-### `exercises.ts`
-
-Exercise database and metadata.
-
-### `templates.ts`
-
-User routines/templates.
-
-### `progression.ts`
-
-Progression rules.
-
-### `knowledge.ts`
-
-Training principles and evidence metadata.
-
-### `rules.ts`
-
-Decision rules.
-
-### `features.ts`
-
-Feature calculations.
-
-### `states.ts`
-
-Training-state calculations.
-
-### `recommendations.ts`
-
-Recommendation generation/ranking.
-
-### `adaptation.ts`
-
-Today's Context adaptation.
-
-### `storage.ts`
-
-Persistence abstraction.
-
-### `seed.ts`
-
-Initial data.
-
-### `schema.sql`
-
-Future SQLite schema.
+The architectural boundary to preserve is that presentation and storage consume
+structured domain results; they do not independently redefine coaching rules or
+planning authority. Filenames and component boundaries may change without
+changing these responsibilities.
 
 ---
 
-# 45. Persistence
+## 45. Persistence
 
-Current:
+### Current implementation
 
-```text id="8b9q0e"
-localStorage
-```
+Browser `localStorage` persists workout history, saved plans/templates,
+preferences, recommendation decisions, gym/context settings, recurring
+structure, and the active workout session. History has a browser backup copy,
+and stored records are normalized for compatibility with earlier formats.
 
-Keys:
+During local development, a server endpoint mirrors Bobby-owned browser data to
+a versioned local JSON snapshot. Revision checks reject stale snapshot writes.
+The browser-storage path remains usable when that development endpoint is
+unavailable. The canonical key list and snapshot format belong to the
+persistence implementation rather than a duplicated list in this specification.
 
-```text id="v7d4mc"
-bobby-bulk-workouts
-bobby-bulk-templates
-bobby-bulk-plans
-```
+### Persistence requirements
 
-SQLite remains the eventual migration target.
+Persistence must preserve user-owned plans, recommendation decisions, planning
+authority, the prescription captured at session start, and actual logged sets.
+Generated sessions can be saved as history without being promoted to recurring
+user-owned plans. Resuming a workout should retain the session the user started.
+
+SQLite remains the eventual migration target; changing the persistence backend
+must not change planning authority or reinterpret historical records.
 
 ---
 
-# 46. Recommended Development Order
+## 46. Recommended Development Order
+
+These phases describe development priorities and dependencies, not a strict
+completion ledger. Parts of later phases already exist; unfinished earlier
+capabilities can still require follow-up work.
 
 ### Phase 1 — Core data model
 
@@ -1440,7 +1596,9 @@ Program
 → Set
 ```
 
-without breaking the existing application.
+for user-owned structure without breaking the existing application. Model
+planning authority and standalone generated workout/session records without
+requiring Program or Split membership.
 
 ### Phase 2 — Better workout logging
 
@@ -1469,7 +1627,7 @@ Implement:
 * Equipment categories
 * Today's gym
 * Temporary unavailable equipment
-* Available weights
+* Individual exercises unavailable for this workout
 * Time limit
 
 ### Phase 5 — Exercise intelligence
@@ -1507,13 +1665,15 @@ Keep fatigue primarily under the hood.
 ### Phase 9 — Decision engine
 
 ```text
-Plan
+Planning Authority
++ Goals / Priorities
++ User Plan (when applicable)
 + Context
 + History
-+ Goals
++ Features
 + State
 + Evidence
-→ Recommendation
+→ Today's Workout / Recommendations
 ```
 
 ### Phase 10 — Today's adaptation
@@ -1544,11 +1704,34 @@ Evaluate whether the split expresses the resolved goal and muscle-priority
 order through practical direct frequency, volume distribution, recovery, and
 fresh work. Suggest redistribution only when a material mismatch is present.
 
-### Phase 14 — Analytics
+### Phase 14 — Recommended Workout foundation
+
+Construct an executable session with zero saved plans or splits. Resolve goals
+and ordered priorities, use direct working-set history and training state to
+select muscle opportunities, and choose compatible exercises and prescriptions
+under today's constraints. Keep generated workouts temporary and planning
+authority explicit through preview, execution, and history.
+
+### Phase 15 — Stimulus-aware workout construction
+
+Accumulate direct and supporting work across the selected session. Use that
+stimulus to estimate remaining useful work without treating compound overlap as
+a binary veto on isolation. Let priority, recent workload, recovery, and time
+determine whether additional direct work is justified. Keep supporting-work
+weights identifiable as coaching heuristics.
+
+### Phase 16 — Post-workout analysis / adaptive feedback
+
+Compare the prescribed session with what was actually completed, account for
+performance anomalies, update history and state, and feed those results into
+future construction or user-plan recommendations. Keep this analysis outside
+the set-logging flow and preserve the authority of the original session.
+
+### Phase 17 — Analytics
 
 Build the Progress/Insights tab.
 
-### Phase 15 — Optional LLM
+### Phase 18 — Optional LLM
 
 Add:
 
@@ -1558,60 +1741,47 @@ Add:
 
 ---
 
-# 47. The Core Bobby Loop
+## 47. The Core Bobby Loop
 
 The entire product can ultimately be summarized as:
 
 ```text id="9j7s2b"
-             ┌──────────────────────┐
-             │   MY TRAINING PLAN   │
-             └──────────┬───────────┘
-                        ↓
-             ┌──────────────────────┐
-             │   TODAY'S CONTEXT    │
-             │ Gym / Equipment /    │
-             │ Time / Constraints   │
-             └──────────┬───────────┘
-                        ↓
-             ┌──────────────────────┐
-             │       HISTORY        │
-             │ Performance / Volume │
-             │ Frequency / Fatigue  │
-             └──────────┬───────────┘
-                        ↓
-             ┌──────────────────────┐
-             │   TRAINING KNOWLEDGE │
-             │ Evidence + Principles│
-             └──────────┬───────────┘
-                        ↓
-             ┌──────────────────────┐
-             │    BOBBY ENGINE      │
-             │ Deterministic Rules  │
-             └──────────┬───────────┘
-                        ↓
-             ┌──────────────────────┐
-             │ TODAY'S RECOMMENDATION│
-             └──────────┬───────────┘
-                        ↓
-                   USER ACCEPTS
-                        ↓
-             ┌──────────────────────┐
-             │      WORKOUT         │
-             │ Fast set-by-set log  │
-             └──────────┬───────────┘
-                        ↓
-             ┌──────────────────────┐
-             │       HISTORY        │
-             └──────────┬───────────┘
-                        │
-                        └──────────────→ Future Bobby
+Planning Authority
+Recommended Workout / My Plans
+          ↓
+Goals / Priorities / Preferences
++ User Plan (when applicable)
++ Today's Context (gym / equipment / time)
++ History / Features / Training State
++ Training Knowledge / Evidence
+          ↓
+Bobby Engine — deterministic decisions
+          ↓
+Construct Today's Workout / Adapt User-Owned Plan
+          ↓
+User starts / adjusts / chooses another workout
+          ↓
+WorkoutSession — prescription snapshot + planning authority
+          ↓
+Fast set-by-set logging
+          ↓
+Actual history + feedback + post-workout analysis
+          ↓
+Updated features and state → Future Bobby decisions
 ```
+
+Accepting a permanent plan change is a separate, explicit decision in My Plans;
+starting or modifying a generated session does not grant that permission.
 
 ### The one-sentence definition
 
-> **Bobby Bulk is a personal, evidence-informed, history-aware training coach that recommends and adapts the user's existing workouts while keeping the user in control.**
+> **Bobby Bulk is a personal, evidence-informed, history-aware training coach that either constructs today's workout or intelligently adapts a user-owned plan, while keeping planning authority explicit and the user in control.**
 
-And I think the most important design constraint to preserve throughout implementation is:
+The central abstraction is:
+
+> **Planning authority determines what Bobby may change. Training need determines what Bobby wants to do. Context determines what Bobby can do.**
+
+The most important experience constraint is:
 
 > **Bobby should be sophisticated under the hood but extremely low-friction on the surface.**
 

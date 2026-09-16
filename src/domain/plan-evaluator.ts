@@ -1,11 +1,13 @@
 import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { recommendNext } from './progression'
+import { recommendExerciseLoad } from './load-recommendation'
+import { isExerciseAvailable } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { buildTrace, compareRecommendations } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
 import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
-import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationDecision, UserPreferences, Workout, WorkoutPlan } from './models'
+import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan } from './models'
 
 // A single workout plan has no weekly split/calendar context. Three is a
 // conservative opportunity ceiling for detecting sparse recent exposure; the
@@ -14,7 +16,7 @@ export const PLAN_FREQUENCY_OPPORTUNITIES = 3
 
 type PriorityAddReason = 'missing-slot' | 'low-volume' | 'low-frequency'
 
-export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = []): ExerciseRecommendationCandidate[] {
+export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = [], context?: TodaysContext): ExerciseRecommendationCandidate[] {
   const recommendations: ExerciseRecommendationCandidate[] = []
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const planExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
@@ -29,13 +31,17 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
   const priorityAddExerciseIds = new Set<string>()
 
   for (const { exercise, planned } of planExercises) {
+    if (context && !isExerciseAvailable(exercise, context)) continue
     const features = calculateExerciseFeatures(exercise, history, asOf)
-    const progression = recommendNext(exercise, planned, history, availableLoads)
+    const load = context?.availableEquipment === undefined ? undefined : recommendExerciseLoad(exercise, planned, history, availableLoads, preferences.weightUnit, asOf ?? new Date().toISOString().slice(0, 10))
+    const progression = load?.kind === 'target'
+      ? { exercise, sets: planned.sets, repRange: planned.repRange, weight: load.weight, action: load.action, confidence: load.confidence, reasons: [load.reason] }
+      : recommendNext(exercise, planned, history, availableLoads, preferences.weightUnit)
     const goalAligned = preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))
     const preferenceState = classifyPreference(exercise.id, preferences, decisions)
-    if (features.sessionsPerformed > 0 && progression.action !== 'start-here') {
+    if (load?.kind !== 'choose-load' && features.sessionsPerformed > 0 && progression.action !== 'start-here') {
       const trace = buildTrace('double-progression')
-      recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: [progression.reasons[0], historicalPerformanceEvidence(features), progression.reasons[1]], trace })
+      recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: [...progression.reasons, historicalPerformanceEvidence(features)], trace })
     }
     if (features.sessionsPerformed >= 2 && goalAligned && preferenceState !== 'excluded' && ['progressing', 'stable'].includes(features.progressionState)) {
       const trace = buildTrace('keep-stable-exercise')
@@ -51,7 +57,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
         exercises,
         goals: preferences.goals,
         priorityMuscles: priorityProfile.orderedMuscles,
-        constraints: { excludedExerciseIds: [...planExerciseIds], requireSameCategory: true },
+        constraints: { availableEquipment: context?.availableEquipment, unavailableEquipment: context?.unavailableEquipment, excludedExerciseIds: [...planExerciseIds], requireSameCategory: true },
         preferences,
         decisions,
       })
@@ -72,7 +78,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     // A priority add is valid on its own merits. Session "coherence" is not a
     // hard constraint: it must never silently suppress an otherwise valid
     // priority recommendation or limit how many can coexist.
-    const candidate = priorityCandidates[0]
+    const candidate = priorityCandidates.find((exercise) => !context || isExerciseAvailable(exercise, context))
     const desiredFrequency = priorityProfile.desiredFrequency(priority, PLAN_FREQUENCY_OPPORTUNITIES)
     const addReason = priorityAddReason(muscle, desiredFrequency)
     if (!represented && candidate && addReason && !priorityAddExerciseIds.has(candidate.id)) {

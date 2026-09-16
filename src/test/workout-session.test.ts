@@ -3,9 +3,44 @@ import { exercises } from '../domain/exercises'
 import { adaptWorkoutForTime, estimateTypicalDuration } from '../domain/adaptation'
 import { applyAcceptedRecommendation } from '../domain/plan-actions'
 import { recommendNext } from '../domain/progression'
-import { completeWorkoutSession, createPlannedExercise, createWorkoutSession, normalizeWorkoutSession, normalizeWorkoutTemplate, planExerciseIds, resolveWorkoutForToday } from '../domain/workout-session'
+import { completeWorkoutSession, createPlannedExercise, createWorkoutSession, createWorkoutSessionForToday, normalizeWorkoutSession, normalizeWorkoutTemplate, planExerciseIds, resolveWorkoutForToday } from '../domain/workout-session'
+import { analyzeWorkoutSession } from '../domain/workout-analysis'
+import type { Recommendation, WorkoutTemplate } from '../domain/models'
 
 describe('planned workouts and sessions', () => {
+  it('keeps the adapted two-set prescription through start, restart, and completion', () => {
+    const plan: WorkoutTemplate = { id: 'custom', name: 'Custom', description: '', focus: 'Back', exerciseIds: ['lat-pulldown'], plannedExercises: [{ exerciseId: 'lat-pulldown', order: 0, sets: 3, repRange: { min: 6, max: 9 }, setType: 'working', groupId: 'group', notes: 'Controlled reps' }] }
+    const change: Recommendation = { id: 'time', type: 'MODIFY', priority: 1, target: { kind: 'exercise', exerciseId: 'lat-pulldown' }, change: { kind: 'modify', exerciseId: 'lat-pulldown', changes: { sets: 2 } }, reason: 'Available time', trace: { ruleId: 'adapt-available-time', principleId: 'time', principleDescription: 'Fit to time', evidenceLevel: 'D', source: { name: 'Coaching heuristic' } } }
+    const active = createWorkoutSessionForToday(plan, [change], exercises, 'kg')
+    expect(active).toMatchObject({ planningAuthority: 'user-plan', unit: 'kg', plannedExercises: [{ sets: 2, repRange: { min: 6, max: 9 }, groupId: 'group', notes: 'Controlled reps' }] })
+    const resumed = normalizeWorkoutSession(JSON.parse(JSON.stringify(active)))
+    resumed.sets = [0, 1].map((index) => ({ id: `set-${index}`, exerciseId: 'lat-pulldown', setType: 'working', weight: 50, reps: 8 }))
+    const completed = completeWorkoutSession(resumed)
+    expect(analyzeWorkoutSession(completed, [], exercises)).toMatchObject({ completion: 'complete', plannedSets: 2, completedPlannedSets: 2, exercises: [{ completion: 'completed' }] })
+    expect(plan.plannedExercises![0].sets).toBe(3)
+    expect(completed.plannedExercises).toEqual(active.plannedExercises)
+    expect(completed.unit).toBe('kg')
+  })
+
+  it('isolates a generated prescription from later plan or catalog mutations', () => {
+    const plan: WorkoutTemplate = { id: 'generated', name: 'Generated', description: '', focus: '', planningAuthority: 'recommended', exerciseIds: ['lat-pulldown'], plannedExercises: [{ exerciseId: 'lat-pulldown', order: 0, sets: 2, repRange: { min: 10, max: 15 }, setType: 'working' }] }
+    const active = createWorkoutSession(plan, undefined, 'lb')
+    plan.plannedExercises![0].repRange.min = 3
+    plan.plannedExercises![0].sets = 5
+    expect(normalizeWorkoutSession(JSON.parse(JSON.stringify(active)))).toMatchObject({ planningAuthority: 'recommended', unit: 'lb', plannedExercises: [{ sets: 2, repRange: { min: 10, max: 15 } }] })
+  })
+
+  it('preserves replacement and rep-range changes together in the execution snapshot', () => {
+    const plan = normalizeWorkoutTemplate({ id: 'combined', name: 'Combined', exerciseIds: ['lat-pulldown'] }, exercises)
+    const common = { priority: 1, target: { kind: 'exercise' as const, exerciseId: 'lat-pulldown' }, reason: 'test', trace: { ruleId: 'test', principleId: 'test', principleDescription: 'test', evidenceLevel: 'D' as const, source: { name: 'test' } } }
+    const changes: Recommendation[] = [
+      { ...common, id: 'replace', type: 'REPLACE', change: { kind: 'replace', fromExerciseId: 'lat-pulldown', toExerciseId: 'cable-row' } },
+      { ...common, id: 'modify', type: 'MODIFY', change: { kind: 'modify', exerciseId: 'lat-pulldown', changes: { sets: 2, repRange: { min: 5, max: 7 } } } },
+    ]
+    expect(createWorkoutSessionForToday(plan, changes, exercises, 'lb').plannedExercises).toMatchObject([{ exerciseId: 'cable-row', sets: 2, repRange: { min: 5, max: 7 } }])
+    expect(applyAcceptedRecommendation(plan, changes[1]).plannedExercises).toMatchObject([{ sets: 2, repRange: { min: 5, max: 7 } }])
+  })
+
   it('preserves planned exercise order, set details, and grouping', () => {
     const bench = exercises.find((exercise) => exercise.id === 'barbell-bench-press')!
     const row = exercises.find((exercise) => exercise.id === 'cable-row')!

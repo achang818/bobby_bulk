@@ -3,18 +3,22 @@ import "./App.css";
 import "./styles/interface.css";
 import { Navigation, type View } from "./components/Navigation";
 import { TodayDashboard } from "./components/TodayDashboard";
+import { WorkoutSummary } from "./components/WorkoutSummary";
+import { LoadTarget } from "./components/LoadTarget";
+import { contextForGym, defaultGym } from "./domain/gyms";
+import { analyzeWorkoutSession } from "./domain/workout-analysis";
 import { exercises } from "./domain/exercises";
-import { sampleWorkouts } from "./domain/seed";
 import { workoutTemplates } from "./domain/templates";
 import { classifyFatigue } from "./domain/states";
 import { calculateExerciseFeatures, comparePlannedVsActual } from "./domain/features";
 import { evaluateSplit } from "./domain/split-evaluator";
 import { generateRecommendations, recommendationExerciseId } from "./domain/recommendations";
-import { generateRecommendedWorkout } from "./domain/recommended-workout";
+import { generateRecommendedWorkout, skipRecommendedExercise, type RecommendedWorkout } from "./domain/recommended-workout";
 import { loadLocalFileSnapshot, restoreBrowserData, saveLocalFileSnapshot } from "./domain/local-file-sync";
  import { clearActiveWorkoutSession, loadActiveWorkoutSession, loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, persistWorkouts, saveActiveWorkoutSession, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
-import { completeWorkoutSession, createPlannedExercise, createWorkoutSession, planExerciseIds, resolveWorkoutForToday } from "./domain/workout-session";
+import { captureSessionGym, completeWorkoutSession, createPlannedExercise, createWorkoutSession, createWorkoutSessionForToday, planExerciseIds, resolveWorkoutForToday, sessionExercises, sessionLoadInput } from "./domain/workout-session";
+import { saveGyms } from "./domain/storage";
 import { convertWeight, displayWeight, effectiveLoad } from "./domain/units";
 import type { LoggedSet, Recommendation, TrainingGoal, UserPreferences, WeightUnit, Workout, WorkoutSession, WorkoutTemplate, Gym, RecommendationDecision, TodaysContext, Split, } from "./domain/models";
 type SetInput = {
@@ -23,15 +27,13 @@ type SetInput = {
     rir: string;
     rpe: string;
 };
-const defaultGym: Gym = { id: "default-gym", name: "Default gym", equipment: ["dumbbells", "barbells", "cables", "machines", "benches", "pull-up-bar"], availableLoads: [{ equipment: "dumbbells", increments: [20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70] }], };
 const emptyPlan: WorkoutTemplate = { id: "no-plan-selected", name: "No workout selected", description: "Create a plan first, then Bobby can recommend how to perform it today.", focus: "Your training plan", plannedExercises: [], exerciseIds: [], };
 function App() {
     const loggerRef = useRef<HTMLElement>(null);
     const [view, setView] = useState<View>("today");
-    const [workouts, setWorkouts] = useState<Workout[]>(() => {
-        const saved = loadWorkouts();
-        return saved.length > 0 ? saved : sampleWorkouts;
-    });
+    const [completedWorkoutId, setCompletedWorkoutId] = useState<string>();
+    const [startNotice, setStartNotice] = useState('');
+    const [workouts, setWorkouts] = useState<Workout[]>(() => loadWorkouts());
     const [selectedExerciseId, setSelectedExerciseId] = useState(() => loadActiveWorkoutSession()?.plannedExercises?.[0]?.exerciseId ?? exercises[0].id);
     const [exerciseSearch, setExerciseSearch] = useState("");
     const [activeSession, setActiveSession] = useState<WorkoutSession | null>(() => loadActiveWorkoutSession());
@@ -125,26 +127,47 @@ function App() {
         };
     }, [showLogger]);
     const currentGym = gyms.find((gym) => gym.id === todaysContext.gymId) ?? gyms[0] ?? defaultGym;
+    const gymContext = useMemo(() => contextForGym(todaysContext, currentGym), [todaysContext, currentGym]);
+    const coachingContext = activeSession?.context ?? gymContext;
     const workoutsInCurrentUnit = useMemo(() => workouts.map((workout) => ({ ...workout, unit: preferences.weightUnit, sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(effectiveLoad(set, preferences.bodyweightLb), workout.unit, preferences.weightUnit), })), })), [preferences.bodyweightLb, preferences.weightUnit, workouts]);
-    const recommendedPreview = useMemo(() => generateRecommendedWorkout({ exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads }), [workoutsInCurrentUnit, preferences, todaysContext, currentGym.availableLoads]);
+    const previewDate = new Date().toISOString().slice(0, 10);
+    const recommendedInput = useMemo(() => ({ exercises, history: workouts, preferences, todaysContext: gymContext, asOf: previewDate }), [workouts, preferences, gymContext, previewDate]);
+    const basePreview = useMemo(() => generateRecommendedWorkout(recommendedInput), [recommendedInput]);
+    const [exerciseChoices, setExerciseChoices] = useState<{ base: RecommendedWorkout; skippedIds: string[] }>();
+    const skippedIds = exerciseChoices?.base === basePreview ? exerciseChoices.skippedIds : [];
+    const previewChanges = useMemo(() => {
+        let result = { recommendation: basePreview, message: '' };
+        const skipped: string[] = [];
+        for (const id of exerciseChoices?.base === basePreview ? exerciseChoices.skippedIds : []) {
+            skipped.push(id);
+            result = skipRecommendedExercise(recommendedInput, result.recommendation, id, skipped);
+        }
+        return result;
+    }, [basePreview, recommendedInput, exerciseChoices]);
+    const recommendedPreview = previewChanges.recommendation;
     const previewPlan = activeSession ? { ...activePlan, name: activeSession.title, focus: activeSession.title, plannedExercises: activeSession.plannedExercises } : recommendedPreview.workout;
     const activePlanExerciseIds = planExerciseIds(activePlan);
     const currentSplit = useMemo<Split | undefined>(() => plans.length ? { id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) } : undefined, [plans]);
-    const planRecommendations = useMemo(() => generateRecommendations({ plan: activePlan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: activePlan.planningAuthority ?? "user-plan" }), [activePlan, currentGym.availableLoads, currentSplit, plans, preferences, recommendationDecisions, todaysContext, workoutsInCurrentUnit]);
+    const planRecommendations = useMemo(() => generateRecommendations({ plan: activePlan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext: coachingContext, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: activePlan.planningAuthority ?? "user-plan" }), [activePlan, currentSplit, plans, preferences, recommendationDecisions, coachingContext, workoutsInCurrentUnit]);
     const sessionRecommendations = useMemo(() => planRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), [planRecommendations, recommendationDecisions]);
     const resolvedPlan = useMemo(() => resolveWorkoutForToday(activePlan, sessionRecommendations, exercises), [activePlan, sessionRecommendations]);
-    const workoutExerciseIds = useMemo(() => activeSession?.plannedExercises?.map((exercise) => exercise.exerciseId) ?? planExerciseIds(resolvedPlan), [activeSession, resolvedPlan]);
+    const workoutExerciseIds = useMemo(() => activeSession ? sessionExercises(activeSession).map((exercise) => exercise.exerciseId) : planExerciseIds(resolvedPlan), [activeSession, resolvedPlan]);
     const sessionPlannedExercises = useMemo(() => resolvedPlan.plannedExercises ?? [], [resolvedPlan]);
     const sessionSets = activeSession?.sets ?? [];
-    const loggerSetTargets = useMemo(() => new Map((activeSession?.plannedExercises ?? sessionPlannedExercises).map((item) => [item.exerciseId, item.sets])), [activeSession?.plannedExercises, sessionPlannedExercises]);
+    const sessionUnit = activeSession?.unit ?? preferences.weightUnit;
+    const loggerSetTargets = useMemo(() => new Map((activeSession ? sessionExercises(activeSession) : sessionPlannedExercises).map((item) => [item.exerciseId, item.sets])), [activeSession, sessionPlannedExercises]);
     const initialSetInput = useMemo<SetInput>(() => {
         const exercise = exercises.find((item) => item.id === selectedExerciseId);
         if (!exercise)
             return { weight: "0", reps: "0", rir: "", rpe: "" };
         const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && recommendationExerciseId(item) === selectedExerciseId && latestRecommendationDecision(item.id, recommendationDecisions) !== "dismissed")?.change;
-        const latestSet = [...workouts].sort((a, b) => b.date.localeCompare(a.date)).flatMap((workout) => workout.sets.filter((set) => set.exerciseId === selectedExerciseId).map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, preferences.weightUnit), }))).at(0);
-        return { weight: String(progression?.kind === "progression" ? progression.recommendedLoad || latestSet?.weight || 0 : latestSet?.weight || 0), reps: String(progression?.kind === "progression" ? progression.repRange.min : latestSet?.reps ?? exercise.repRange.min), rir: "", rpe: "", };
-    }, [planRecommendations, preferences.weightUnit, recommendationDecisions, selectedExerciseId, workouts]);
+        const prescription = activeSession ? sessionExercises(activeSession).find((item) => item.exerciseId === selectedExerciseId) : undefined;
+        const latestSet = activeSession?.sets.filter((set) => set.exerciseId === selectedExerciseId).at(-1) ?? [...workouts].sort((a, b) => b.date.localeCompare(a.date) || (b.completedAt ?? "").localeCompare(a.completedAt ?? "")).flatMap((workout) => workout.sets.filter((set) => set.exerciseId === selectedExerciseId && set.setType === (prescription?.setType ?? "working")).map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, sessionUnit), }))).at(0);
+        const repRange = prescription?.repRange ?? exercise.repRange;
+        const suggestedLoad = progression?.kind === "progression" && progression.recommendedLoad ? displayWeight(progression.recommendedLoad, preferences.weightUnit, sessionUnit) : undefined;
+        const savedInput = activeSession ? sessionLoadInput(activeSession, selectedExerciseId, sessionUnit) : undefined;
+        return { weight: savedInput ?? String(suggestedLoad ?? latestSet?.weight ?? 0), reps: String(Math.min(repRange.max, Math.max(repRange.min, latestSet?.reps ?? repRange.min))), rir: "", rpe: "", };
+    }, [activeSession, planRecommendations, preferences.weightUnit, sessionUnit, recommendationDecisions, selectedExerciseId, workouts]);
     const setInput = setInputOverrides[selectedExerciseId] ?? initialSetInput;
     const selectableExercises = exercises.filter((exercise) => exercise.name.toLowerCase().includes(exerciseSearch.trim().toLowerCase()));
     function updateSetInput(next: Partial<SetInput>) {
@@ -154,12 +177,24 @@ function App() {
         setSelectedExerciseId(nextId);
         setExerciseSearch("");
         setActiveSession((current) => {
-            if (!current || current.plannedExercises?.some((exercise) => exercise.exerciseId === nextId)) return current;
-            return { ...current, plannedExercises: [...(current.plannedExercises ?? []), createPlannedExercise(nextId, current.plannedExercises?.length ?? 0, exercises.find((exercise) => exercise.id === nextId))] };
+            if (!current || sessionExercises(current).some((exercise) => exercise.exerciseId === nextId)) return current;
+            return { ...current, addedExercises: [...(current.addedExercises ?? []), createPlannedExercise(nextId, sessionExercises(current).length, exercises.find((exercise) => exercise.id === nextId))] };
         });
     }
     function updateTodaysContext(next: TodaysContext) {
-        setTodaysContext(saveTodaysContext(next));
+        freezeActiveGym();
+        setStartNotice('');
+        const gym = gyms.find((item) => item.id === next.gymId) ?? currentGym;
+        setTodaysContext(saveTodaysContext(contextForGym({ ...next, unavailableEquipment: next.gymId === todaysContext.gymId ? next.unavailableEquipment : [] }, gym)));
+    }
+    function freezeActiveGym() {
+        setActiveSession((current) => current && !current.gym ? captureSessionGym(current, currentGym, gymContext) : current);
+    }
+    function updateGym(gym: Gym) {
+        freezeActiveGym();
+        setStartNotice('');
+        setGyms(saveGyms(gyms.some((item) => item.id === gym.id) ? gyms.map((item) => item.id === gym.id ? gym : item) : [...gyms, gym]));
+        setTodaysContext(saveTodaysContext(contextForGym(todaysContext, gym)));
     }
     function updateSessionSets(update: (current: LoggedSet[]) => LoggedSet[]) {
         setActiveSession((current) => {
@@ -175,10 +210,10 @@ function App() {
         const parsedReps = Number(setInput.reps);
         const parsedRir = setInput.rir.trim() === "" ? undefined : Number(setInput.rir);
         const parsedRpe = setInput.rpe.trim() === "" ? undefined : Number(setInput.rpe);
-        if (!Number.isFinite(parsedWeight) || !Number.isFinite(parsedReps) || parsedReps <= 0 || (parsedRir !== undefined && (!Number.isFinite(parsedRir) || parsedRir < 0 || parsedRir > 5)) || (parsedRpe !== undefined && (!Number.isFinite(parsedRpe) || parsedRpe < 1 || parsedRpe > 10)))
+        if (setInput.weight.trim() === "" || parsedWeight < 0 || !Number.isFinite(parsedWeight) || !Number.isFinite(parsedReps) || parsedReps <= 0 || (parsedRir !== undefined && (!Number.isFinite(parsedRir) || parsedRir < 0 || parsedRir > 5)) || (parsedRpe !== undefined && (!Number.isFinite(parsedRpe) || parsedRpe < 1 || parsedRpe > 10)))
             return;
         const target = loggerSetTargets.get(selectedExerciseId) ?? 0;
-        const setType = activeSession?.plannedExercises?.find((exercise) => exercise.exerciseId === selectedExerciseId)?.setType ?? "working";
+        const setType = activeSession ? sessionExercises(activeSession).find((exercise) => exercise.exerciseId === selectedExerciseId)?.setType ?? "working" : "working";
         const completedSets = sessionSets.filter((set) => set.exerciseId === selectedExerciseId).length;
         updateSessionSets((current) => [...current, { id: crypto.randomUUID(), exerciseId: selectedExerciseId, setType, weight: parsedWeight, reps: parsedReps, ...(parsedRir === undefined ? {} : { rir: parsedRir }), ...(parsedRpe === undefined ? {} : { rpe: parsedRpe }), },]);
         if (completedSets + 1 === target) {
@@ -191,8 +226,9 @@ function App() {
     function finishWorkout() {
         if (!activeSession || sessionSets.length === 0)
             return;
-        const workout = { ...completeWorkoutSession(activeSession), unit: preferences.weightUnit };
+        const workout = { ...completeWorkoutSession(activeSession), unit: sessionUnit };
         setWorkouts(saveWorkout(workout, workouts));
+        setCompletedWorkoutId(workout.id);
         setActiveSession(null);
         setShowLogger(false);
         setView("history");
@@ -203,14 +239,16 @@ function App() {
             setShowLogger(true);
             return;
         }
-        const generatedRecommendations = generateRecommendations({ plan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext, availableLoads: currentGym.availableLoads, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: "user-plan" });
-        const sessionPlan = resolveWorkoutForToday(plan, generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), exercises);
-        const shortenedExerciseIds = planExerciseIds(sessionPlan);
-        const initialExerciseIds = shortenedExerciseIds.length ? shortenedExerciseIds : plan.id === "empty-workout" ? [exercises[0].id] : [];
+        const generatedRecommendations = generateRecommendations({ plan, exercises, history: workoutsInCurrentUnit, preferences, todaysContext: gymContext, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: "user-plan" });
+        const session = captureSessionGym(createWorkoutSessionForToday(plan, generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), exercises, preferences.weightUnit), currentGym, gymContext);
+        session.adaptationNotes = generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment").map((recommendation) => recommendation.reason);
+        if (!session.plannedExercises?.length && plan.id !== "empty-workout") { setStartNotice(`No exercises from ${plan.name} fit today's gym and time settings. Adjust those settings before starting. Your saved plan is unchanged.`); return; }
+        setStartNotice('');
+        if (!session.plannedExercises?.length && plan.id === "empty-workout") session.addedExercises = [createPlannedExercise(exercises[0].id, 0, exercises[0])];
         setActivePlan(plan);
-        setSelectedExerciseId(initialExerciseIds[0] ?? exercises[0].id);
+        setSelectedExerciseId(sessionExercises(session)[0]?.exerciseId ?? exercises[0].id);
         setSetInputOverrides({});
-        setActiveSession(createWorkoutSession(plan, initialExerciseIds.map((id, order) => createPlannedExercise(id, order, exercises.find((exercise) => exercise.id === id)))));
+        setActiveSession(session);
         setShowLogger(true);
     }
     function startRecommendedWorkout() {
@@ -224,17 +262,18 @@ function App() {
         setActivePlan(recommended.workout);
         setSelectedExerciseId(recommendedExercises[0]?.exerciseId ?? exercises[0].id);
         setSetInputOverrides({});
-        setActiveSession(createWorkoutSession(recommended.workout, recommendedExercises));
+        setActiveSession(captureSessionGym(createWorkoutSession(recommended.workout, recommendedExercises, preferences.weightUnit), currentGym, gymContext));
         setShowLogger(true);
     }
     function handleRecommendationDecision(recommendation: Recommendation, decision: "accepted" | "rejected" | "dismissed") {
         setRecommendationDecisions(saveRecommendationDecision(recommendation, decision));
         if (decision !== "accepted")
             return;
+        if (recommendation.trace.ruleId === "adapt-unavailable-equipment" || recommendation.trace.ruleId === "adapt-available-time") return;
         if (activePlan.planningAuthority === "recommended")
             return;
         const updatedPlan = applyAcceptedRecommendation(activePlan, recommendation);
-        if (planExerciseIds(updatedPlan).join("|") === activePlanExerciseIds.join("|"))
+        if (JSON.stringify(updatedPlan) === JSON.stringify(activePlan))
             return;
         setActivePlan(updatedPlan);
         setPlans(savePlan(updatedPlan));
@@ -248,16 +287,19 @@ function App() {
         <div className="profile-chip"><span>Weight unit</span><div className="unit-toggle" role="group" aria-label="Weight unit">{(["lb", "kg"] as const).map((unit) => <button key={unit} aria-pressed={preferences.weightUnit === unit} className={preferences.weightUnit === unit ? "selected" : ""} onClick={() => setPreferences(savePreferences({ ...preferences, weightUnit: unit }))}>{unit}</button>)}</div></div></div>
       </header>
       <main id="top" tabIndex={-1}>
+        {startNotice && <p className="session-size-note" role="alert">{startNotice}</p>}
         {activeSession && !showLogger && <div className="resume-banner"><span><strong>Workout in progress</strong><small>{sessionSets.length} {sessionSets.length === 1 ? "set" : "sets"} logged · saved on this device</small></span><button className="secondary-button" onClick={() => setShowLogger(true)}>Resume workout →</button></div>}
-        {view === "today" && <TodayDashboard plan={previewPlan} reasons={recommendedPreview.reasons} workouts={workoutsInCurrentUnit} preferences={preferences} gyms={gyms} context={todaysContext} inProgress={Boolean(activeSession)} loggedSets={sessionSets.length} workload={classifyFatigue(workouts)} onContextChange={updateTodaysContext} onStart={startRecommendedWorkout} onPlans={() => setView("plans")} onHistory={() => setView("history")}>
-            {activePlan.planningAuthority !== "recommended" && activePlanExerciseIds.length > 0 && <details className="saved-plan-suggestions mini-panel"><summary>Suggestions for {activePlan.name}</summary><p className="brief-note">These apply to your saved plan. Start it from the Plans tab.</p>{planRecommendations.filter((item) => item.type !== "KEEP").map((item) => <RecommendationRow key={item.id} recommendation={item} unit={preferences.weightUnit} decision={latestRecommendationDecision(item.id, recommendationDecisions)} onDecision={handleRecommendationDecision} />)}{planRecommendations.every((item) => item.type === "KEEP") && <p className="brief-note">No changes suggested. Keep following your plan.</p>}</details>}
-        </TodayDashboard>}        {view === "history" && (<HistoryView workouts={workouts} unit={preferences.weightUnit} onUpdate={(workout) => setWorkouts(updateWorkout(workout, workouts))} onDelete={(workoutId) => setWorkouts(deleteWorkout(workoutId, workouts))}/>)}        {view === "exercises" && <ExercisesView />}        {view === "plans" && (<PlansView plans={plans} onSave={(plan) => setPlans(savePlan(plan))} onStart={startPlan} onDelete={(planId) => setPlans(deletePlan(planId))}/>)}        {view === "goals" && (<GoalsView preferences={preferences} onSave={(next) => {
+        {view === "today" && <TodayDashboard plan={previewPlan} reasons={recommendedPreview.reasons} sessionNote={recommendedPreview.sessionNote} workouts={workoutsInCurrentUnit} preferences={preferences} gyms={gyms} context={gymContext} inProgress={Boolean(activeSession)} loggedSets={sessionSets.length} workload={classifyFatigue(workouts)} onContextChange={updateTodaysContext} onSaveGym={updateGym} exerciseChoiceMessage={previewChanges.message} hasExerciseChoices={skippedIds.length > 0} onResetExerciseChoices={() => setExerciseChoices(undefined)} onSkipExercise={(id) => setExerciseChoices((current) => ({ base: basePreview, skippedIds: [...(current?.base === basePreview ? current.skippedIds : []), id] }))} onStart={startRecommendedWorkout} onPlans={() => setView("plans")} onHistory={() => setView("history")}>
+            {activePlan.planningAuthority !== "recommended" && activePlanExerciseIds.length > 0 && <details className="saved-plan-suggestions mini-panel"><summary>Suggestions for {activePlan.name}</summary><p className="brief-note">Equipment and time adjustments apply to today's session. Other accepted changes update your saved plan. Start it from the Plans tab.</p>{planRecommendations.filter((item) => item.type !== "KEEP").map((item) => <RecommendationRow key={item.id} recommendation={item} unit={preferences.weightUnit} decision={latestRecommendationDecision(item.id, recommendationDecisions)} onDecision={handleRecommendationDecision} />)}{planRecommendations.every((item) => item.type === "KEEP") && <p className="brief-note">No changes suggested. Keep following your plan.</p>}</details>}
+        </TodayDashboard>}        {view === "history" && (<HistoryView key={completedWorkoutId ?? "history"} initialWorkoutId={completedWorkoutId} workouts={workouts} unit={preferences.weightUnit} onUpdate={(workout) => setWorkouts(updateWorkout(workout, workouts))} onDelete={(workoutId) => setWorkouts(deleteWorkout(workoutId, workouts))}/>)}        {view === "exercises" && <ExercisesView />}        {view === "plans" && (<PlansView plans={plans} onSave={(plan) => setPlans(savePlan(plan))} onStart={startPlan} onDelete={(planId) => setPlans(deletePlan(planId))}/>)}        {view === "goals" && (<GoalsView preferences={preferences} onSave={(next) => {
                 setPreferences(savePreferences(next));
                 setView("today");
-            }}/>)}      </main>      {showLogger && (<div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowLogger(false)}>          <section className="modal" role="dialog" aria-modal="true" ref={loggerRef} tabIndex={-1} aria-labelledby="logger-title">            <div className="modal-heading">              <div>                <p className="eyebrow">{activeSession?.title ?? activePlan.name}</p>                <h2 id="logger-title">Log workout</h2>              </div>              <button className="close-button" onClick={() => setShowLogger(false)} aria-label="Close logger">                ×              </button>            </div>            <div className="logger-progress"><div><strong>{sessionSets.length} {sessionSets.length === 1 ? "set" : "sets"} logged</strong><span>{Array.from(loggerSetTargets.values()).reduce((total, count) => total + count, 0)} planned</span></div><progress aria-label="Workout sets completed" value={sessionSets.length} max={Math.max(1, Array.from(loggerSetTargets.values()).reduce((total, count) => total + count, 0))}/></div>            <div className="logger-exercises">              {workoutExerciseIds.map((id, index) => {
+            }}/>)}      </main>      {showLogger && (<div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowLogger(false)}>          <section className="modal" role="dialog" aria-modal="true" ref={loggerRef} tabIndex={-1} aria-labelledby="logger-title">            <div className="modal-heading">              <div>                <p className="eyebrow">{activeSession?.title ?? activePlan.name}</p>                <h2 id="logger-title">Log workout</h2>              </div>              <button className="close-button" onClick={() => setShowLogger(false)} aria-label="Close logger">                ×              </button>            </div>            {activeSession?.gym && <p className="brief-note">Training at {activeSession.gym.name}. Gym changes apply to your next workout.</p>}
+            {Boolean(activeSession?.adaptationNotes?.length) && <details className="session-explanation"><summary>Adjusted for this gym</summary><ul>{activeSession?.adaptationNotes?.map((note, index) => <li key={index}>{note}</li>)}</ul></details>}
+            <div className="logger-progress"><div><strong>{sessionSets.length} {sessionSets.length === 1 ? "set" : "sets"} logged</strong><span>{Array.from(loggerSetTargets.values()).reduce((total, count) => total + count, 0)} planned</span></div><progress aria-label="Workout sets completed" value={sessionSets.length} max={Math.max(1, Array.from(loggerSetTargets.values()).reduce((total, count) => total + count, 0))}/></div>            <div className="logger-exercises">              {workoutExerciseIds.map((id, index) => {
                 const exercise = exercises.find((item) => item.id === id);
                 const loggedSets = sessionSets.filter((set) => set.exerciseId === id);
-                const plannedExercise = activeSession?.plannedExercises?.find((item) => item.exerciseId === id);
+                const plannedExercise = activeSession ? sessionExercises(activeSession).find((item) => item.exerciseId === id) : undefined;
                 if (!exercise)
                     return null;
                 return (<article className={selectedExerciseId === id ? "logger-exercise active" : "logger-exercise"} key={id}>
@@ -267,6 +309,7 @@ function App() {
                         <span className="logger-exercise-state">{loggedSets.length === (loggerSetTargets.get(id) ?? exercise.defaultSets) ? "✓" : ""}</span>
                     </button>
                     {selectedExerciseId === id && <div className="logger-set-entry">
+                        <LoadTarget recommendation={plannedExercise?.loadRecommendation} />
                         <details className="logger-exercise-picker"><summary>Switch or add an exercise</summary>
                             <div className="logger-picker-heading"><strong>Switch exercise</strong><small>Add any movement for this session only.</small></div>
                             <label>Search movements<input type="search" value={exerciseSearch} onChange={(event) => setExerciseSearch(event.target.value)} placeholder="e.g. lat pulldown" /></label>
@@ -274,21 +317,21 @@ function App() {
                                 {selectableExercises.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
                             </select></label>
                         </details>
-                        {loggedSets.map((set, setIndex) => <div className="logged-set" key={set.id}><span>Set {setIndex + 1}</span><strong>{set.weight} {preferences.weightUnit} × {set.reps}</strong><span>RIR {set.rir ?? "-"} · RPE {set.rpe ?? "-"}</span></div>)}
+                        {loggedSets.map((set, setIndex) => <div className="logged-set" key={set.id}><span>Set {setIndex + 1}</span><strong>{set.weight} {sessionUnit} × {set.reps}</strong><span>RIR {set.rir ?? "-"} · RPE {set.rpe ?? "-"}</span></div>)}
                         <div className="input-row effort-input-row">
-                            <label>Weight ({preferences.weightUnit})<input inputMode="decimal" value={setInput.weight} onChange={(event) => updateSetInput({ weight: event.target.value })}/></label>
+                            <label>Weight ({sessionUnit})<input inputMode="decimal" placeholder="Choose weight" value={setInput.weight} onChange={(event) => updateSetInput({ weight: event.target.value })}/></label>
                             <label>Reps<input inputMode="numeric" value={setInput.reps} onChange={(event) => updateSetInput({ reps: event.target.value })}/></label>
                             <label title="Reps in reserve: how many more reps you could do">RIR<input inputMode="numeric" min="0" max="5" placeholder="Optional" value={setInput.rir} onChange={(event) => updateSetInput({ rir: event.target.value })}/></label>
                             <label title="Rate of perceived exertion: effort from 1 to 10">RPE<input inputMode="numeric" min="1" max="10" placeholder="Optional" value={setInput.rpe} onChange={(event) => updateSetInput({ rpe: event.target.value })}/></label>
                         </div>
-                        <button className="secondary-button full" onClick={addSet}>{loggedSets.length >= (loggerSetTargets.get(id) ?? exercise.defaultSets) ? "＋ Log extra working set" : "✓ Log working set"}</button>
+                        <button className="secondary-button full" disabled={setInput.weight.trim() === "" || !Number.isFinite(Number(setInput.weight)) || Number(setInput.weight) < 0} onClick={addSet}>{loggedSets.length >= (loggerSetTargets.get(id) ?? exercise.defaultSets) ? "＋ Log extra working set" : "✓ Log working set"}</button>
                         {loggedSets.length >= (loggerSetTargets.get(id) ?? exercise.defaultSets) && <p className="extra-set-note">The recommendation is complete. Extra sets are recorded and included in your history.</p>}
                     </div>}
                 </article>);
             })}            </div>            <div className="logger-legacy-controls">              <label>                Exercise                <select value={selectedExerciseId} onChange={(event) => setSelectedExerciseId(event.target.value)}>                {(workoutExerciseIds.length ? workoutExerciseIds : exercises.map((exercise) => exercise.id)).map((id) => {
                 const exercise = exercises.find((item) => item.id === id);
                 return exercise ? (<option key={exercise.id} value={exercise.id}>                      {exercise.name}                    </option>) : null;
-            })}              </select>            </label>            </div>            <div className="draft-list">              {sessionSets.length === 0 ? (<p className="empty-state">                  Log sets as you move through the plan.                </p>) : (sessionSets.map((set) => (<div className="draft-set" key={set.id}>                    <span>                      {exercises.find((exercise) => exercise.id === set.exerciseId)?.name}{" "}                      · Set {sessionSets.filter((item) => item.exerciseId === set.exerciseId).findIndex((item) => item.id === set.id) + 1}                    </span>                    <strong>                      {set.weight} {preferences.weightUnit} × {set.reps}                    </strong>                    <button onClick={() => updateSessionSets((current) => current.filter((item) => item.id !== set.id))}>                      Remove                    </button>                  </div>)))}            </div>            <button className="primary-button full" disabled={sessionSets.length === 0} onClick={finishWorkout}>              Finish workout            </button>            <p className="timing-note">              Your sets are saved as you go. Close this window to pause and resume later.            </p>          </section>        </div>)}    </div>);
+            })}              </select>            </label>            </div>            <div className="draft-list">              {sessionSets.length === 0 ? (<p className="empty-state">                  Log sets as you move through the plan.                </p>) : (sessionSets.map((set) => (<div className="draft-set" key={set.id}>                    <span>                      {exercises.find((exercise) => exercise.id === set.exerciseId)?.name}{" "}                      · Set {sessionSets.filter((item) => item.exerciseId === set.exerciseId).findIndex((item) => item.id === set.id) + 1}                    </span>                    <strong>                      {set.weight} {sessionUnit} × {set.reps}                    </strong>                    <button onClick={() => updateSessionSets((current) => current.filter((item) => item.id !== set.id))}>                      Remove                    </button>                  </div>)))}            </div>            <button className="primary-button full" disabled={sessionSets.length === 0} onClick={finishWorkout}>              Finish workout            </button>            <p className="timing-note">              Your sets are saved as you go. Close this window to pause and resume later.            </p>          </section>        </div>)}    </div>);
 }
 export function LegacyTodayView({ plan, workouts, onLog, }: {
     plan: WorkoutTemplate;
@@ -395,14 +438,15 @@ function GoalsView({ preferences, onSave, }: {
             </section>
         </>);
 }
-function HistoryView({ workouts, unit, onUpdate, onDelete, }: {
+function HistoryView({ workouts, unit, onUpdate, onDelete, initialWorkoutId, }: {
         workouts: Workout[];
         unit: WeightUnit;
         onUpdate?: (workout: Workout) => void;
         onDelete: (workoutId: string) => void;
+        initialWorkoutId?: string;
 }) {
-        const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(null);
-        const [editingSets, setEditingSets] = useState<LoggedSet[]>([]);
+        const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(initialWorkoutId ?? null);
+        const [editingSets, setEditingSets] = useState<LoggedSet[]>(() => workouts.find((workout) => workout.id === initialWorkoutId)?.sets.map((set) => ({ ...set })) ?? []);
         const [newExerciseId, setNewExerciseId] = useState(exercises[0].id);
         const [newWeight, setNewWeight] = useState("");
         const [newReps, setNewReps] = useState("");
@@ -410,6 +454,7 @@ function HistoryView({ workouts, unit, onUpdate, onDelete, }: {
         const allWorkouts = [...workouts].sort((a, b) => b.date.localeCompare(a.date) || (b.completedAt ?? "").localeCompare(a.completedAt ?? ""));
         const sortedWorkouts = allWorkouts.slice(0, visibleWorkoutCount);
         const selectedWorkout = allWorkouts.find((workout) => workout.id === selectedWorkoutId);
+        const sessionAnalysis = selectedWorkout ? analyzeWorkoutSession(selectedWorkout, workouts, exercises) : undefined;
         const plannedComparison = selectedWorkout ? comparePlannedVsActual(selectedWorkout) : [];
         function selectWorkout(workout: Workout) {
                 setSelectedWorkoutId(workout.id);
@@ -445,6 +490,7 @@ function HistoryView({ workouts, unit, onUpdate, onDelete, }: {
         }
         return (<>
             <section className="page-intro compact"><div><p className="eyebrow">Your training archive</p><h1>History</h1><p className="lede">Look back at your sessions, track your progress, and fine-tune your log.</p></div><span className="archive-count">{workouts.length} sessions</span></section>
+            {sessionAnalysis && <WorkoutSummary analysis={sessionAnalysis} justCompleted={selectedWorkoutId === initialWorkoutId} />}
             <div className="history-layout">
                 <section className="history-list"><div className="section-heading"><h2>Recent workouts</h2><span className="muted">Newest first</span></div>
                       {sortedWorkouts.map((workout) => <article className={selectedWorkoutId === workout.id ? "workout-row selected" : "workout-row"} key={workout.id} tabIndex={0} onClick={() => selectWorkout(workout)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") selectWorkout(workout); }}>
@@ -457,7 +503,7 @@ function HistoryView({ workouts, unit, onUpdate, onDelete, }: {
                 <aside className="progression-detail history-detail">
                     {selectedWorkout ? <>
                         <div className="section-heading"><div><p className="eyebrow">{formatDate(selectedWorkout.date)}</p><h2>{selectedWorkout.title}</h2></div><span className="muted">{editingSets.length} sets</span></div>
-                        {plannedComparison.length > 0 && <div className="history-plan-comparison">{plannedComparison.map((item) => <span key={item.exerciseId}>{exercises.find((exercise) => exercise.id === item.exerciseId)?.name}: {item.completedWorkingSets}/{item.plannedSets} working sets · demonstrated load {item.demonstratedWorkingLoad ?? "—"}</span>)}</div>}
+                        {plannedComparison.length > 0 && <div className="history-plan-comparison">{plannedComparison.map((item) => <span key={item.exerciseId}>{exercises.find((exercise) => exercise.id === item.exerciseId)?.name}: {item.completedWorkingSets}{item.plannedSets === undefined ? " working sets · additional movement" : `/${item.plannedSets} working sets`}{item.demonstratedWorkingLoad === undefined ? "" : ` · demonstrated load ${displayWeight(item.demonstratedWorkingLoad, selectedWorkout.unit, unit)} ${unit}`}</span>)}</div>}
                         <div className="history-set-list">{editingSets.map((set, index) => <div className="history-set-row" key={set.id}><span>{exercises.find((exercise) => exercise.id === set.exerciseId)?.name ?? set.exerciseId}<small>Set {index + 1} · {set.setType}</small></span><input aria-label="Weight" type="number" readOnly={Boolean(set.loadType && set.loadType !== "external")} value={displayedWeight(set, selectedWorkout)} onChange={(event) => setEditingSets((current) => current.map((item) => item.id === set.id ? { ...item, weight: convertWeight(Number(event.target.value), unit, selectedWorkout.unit ?? unit) } : item))} /><input aria-label="Reps" type="number" value={set.reps} onChange={(event) => setEditingSets((current) => current.map((item) => item.id === set.id ? { ...item, reps: Number(event.target.value) } : item))} /><span>{unit}</span></div>)}</div>
                         <div className="history-add-set">
                             <select aria-label="Exercise for new set" value={newExerciseId} onChange={(event) => setNewExerciseId(event.target.value)}>

@@ -1,6 +1,6 @@
 import type { Exercise, ExerciseFeatures, ExercisePerformance, HistoryConfidence, MuscleFeatures, PlannedVsActualExercise, PrescriptionCompletion, TrainingState, Workout, WorkoutPlan, WorkloadTrend } from './models'
 import { classifyExerciseProgression, classifyMuscleVolume } from './states'
-import { planExerciseIds, plannedExercisesFor } from './workout-session'
+import { compareWorkoutChronology, planExerciseIds, plannedExercisesFor } from './workout-session'
 
 const DAY = 24 * 60 * 60 * 1000
 export const TRAINING_WINDOWS = [7, 14, 28] as const
@@ -44,10 +44,10 @@ export function calculateExercisePerformance(workout: Workout, exerciseId: strin
 }
 
 export function exercisePerformanceHistory(exerciseId: string, history: Workout[]): ExercisePerformance[] {
-  return history.flatMap((workout) => {
+  return [...history].sort(compareWorkoutChronology).flatMap((workout) => {
     const performance = calculateExercisePerformance(workout, exerciseId)
     return performance ? [performance] : []
-  }).sort((a, b) => a.date.localeCompare(b.date) || a.sessionId.localeCompare(b.sessionId))
+  })
 }
 
 export function calculateExerciseFeatures(exercise: Exercise, history: Workout[], asOf = latestDate(history)): ExerciseFeatures {
