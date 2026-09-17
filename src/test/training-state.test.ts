@@ -1,5 +1,6 @@
+import { deriveTrainingState as calculateTrainingState } from '../domain/training-state'
 import { describe, expect, it } from 'vitest'
-import { calculateExerciseFeatures, calculateMuscleFeatures, calculateTrainingState, comparePlannedVsActual, sessionsWithinWindow } from '../domain/features'
+import { calculateExerciseFeatures, calculateMuscleFeatures, comparePlannedVsActual, sessionsWithinWindow } from '../domain/features'
 import { exercises } from '../domain/exercises'
 import type { Workout } from '../domain/models'
 

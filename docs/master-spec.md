@@ -1297,7 +1297,8 @@ Example:
 
 because:
 
-> All working sets reached the top of the prescribed rep range.
+> A completed working set demonstrated the top of the prescribed rep range,
+> with no near-failure effort evidence opposing an increase.
 
 which implements:
 
@@ -1469,6 +1470,56 @@ labeled:
 Workout definitions and session snapshots should retain their planning
 authority so execution and later analysis preserve that distinction. Legacy
 user plans with no explicit authority are treated as `user-plan`.
+
+### History-aware TrainingState contract
+
+Recommended Workout derives one deterministic `TrainingState` for an explicit
+as-of date and display unit before allocating muscles or choosing movements.
+The construction and substitution paths consume that state; they do not query
+raw workout history during candidate ranking or load prescription.
+
+State exposes the following independent evidence, without a combined readiness
+or fatigue score:
+
+* Muscle state: direct working-set counts and session frequency over inclusive
+  7-, 14-, and 28-day windows; days since direct training; workload trend;
+  history confidence; and an explicit recovery classification.
+* Exercise state: completed direct working performances, latest working sets,
+  demonstrated loads/reps and effort, progression trend, historical prescription
+  completion where known, and confidence. Loads use one normalized display unit.
+
+Only completed sessions contribute; missing status is accepted for legacy saved
+history. Ignore future/invalid dates and invalid or zero-rep sets. Planned but
+unlogged sets are not completed volume. Warm-up, drop, and failure sets never
+establish ordinary working load or direct working-set exposure. Secondary muscle
+involvement is not converted to historical direct volume or another exercise's
+load evidence. Missing prescriptions remain unknown, and absent history is not
+classified as high volume or proof of poor recovery.
+
+For this milestone, direct training today or yesterday defers a muscle opportunity.
+High recent volume with exposure in the last week also defers it. These are
+explicit conservative product rules, not a physiological recovery prediction.
+Among the remaining opportunities, rank ordered priorities, goal-derived emphasis,
+recent direct frequency/volume, and time since training. Exercise selection must
+honor that opportunity order, subject to goal/equipment compatibility and useful
+session coverage. Time limits trim lower-ranked opportunities first. Preserve a
+complete session where suitable work exists; do not insert overlapping filler.
+
+Set budgets reflect priority and recent direct exposure. Rep ranges come from the
+selected exercise. Load guidance uses its own latest completed working evidence:
+a demonstrated top-range set can support progression without requiring all of the
+next prescription's sets, 3 x 12, or another fixed completion gate. Near-failure
+effort supports holding the load. Prescription completion remains an independent
+historical fact and does not become true merely because progression is suggested.
+
+Completing, editing, or deleting saved history causes the next recommendation to
+rederive state. Active sessions retain their captured prescription. User-owned
+plans remain restrictive: state may inform suggestions but never silently rewrite
+them. Sequence tests cover completion-to-next-day changes, recovery, undertrained
+priorities, skipped work, direct-only evidence, future/in-progress exclusion,
+unit normalization, deterministic ordering, and no-history/legacy fallbacks.
+Automatic split generation, LLM behavior, and long-term periodization are outside
+this milestone.
 
 ### Entities and relationships
 

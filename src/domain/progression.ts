@@ -10,7 +10,12 @@ export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExerc
   const planned = Array.isArray(plannedOrHistory) ? createPlannedExercise(exercise.id, 0, exercise) : plannedOrHistory
   const history = Array.isArray(plannedOrHistory) ? plannedOrHistory : historyOrLoads as Workout[]
   const availableLoads = Array.isArray(plannedOrHistory) ? historyOrLoads as AvailableLoad[] | undefined : maybeLoads
-  const workingSets = latestSets(history, exercise.id).filter((set) => set.setType === 'working')
+  return recommendFromWorkingSets(exercise, planned, latestSets(history, exercise.id), availableLoads, unit)
+}
+
+/** Progression consumes direct completed sets; prescription completion is separate evidence. */
+export function recommendFromWorkingSets(exercise: Exercise, planned: PlannedExercise, sets: LoggedSet[], availableLoads?: AvailableLoad[], unit?: WeightUnit): ProgressionRecommendation {
+  const workingSets = sets.filter((set) => set.setType === 'working' && Number.isFinite(set.weight) && set.weight >= 0 && Number.isFinite(set.reps) && set.reps > 0)
 
   if (workingSets.length === 0) {
     return recommendation(exercise, planned, 0, 'start-here', 'low', ['No working-set history yet. Start with a manageable weight.'])
@@ -26,7 +31,7 @@ export function recommendNext(exercise: Exercise, plannedOrHistory: PlannedExerc
 
   if (targetRangeSets.length > 0) {
     const atTop = bestSet.reps === planned.repRange.max
-    if (completedPrescription && atTop && !effort.nearFailure) {
+    if (atTop && !effort.nearFailure) {
       const nextWeight = roundWeight(bestSet.weight + weightIncrement(bestSet.weight, exercise, availableLoads, unit))
       if (nextWeight <= bestSet.weight) return recommendation(exercise, planned, bestSet.weight, 'progress-reps', effort.easy ? 'high' : 'medium', ['No heavier load is available here. Keep this load and focus on controlled reps.'])
       return recommendation(exercise, planned, nextWeight, 'increase-weight', effort.easy ? 'high' : 'medium', [

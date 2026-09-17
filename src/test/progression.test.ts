@@ -75,14 +75,14 @@ describe('recommendNext', () => {
     expect(partial.confidence).toBe('high')
   })
 
-  it('uses planned sets and working sets when assessing completion', () => {
+  it('does not gate demonstrated top-range progression on the next set prescription', () => {
     const planned: PlannedExercise = { exerciseId: bench.id, order: 0, sets: 4, repRange: { min: 6, max: 8 }, setType: 'working' }
     expect(recommendNext(bench, planned, [workoutWithSets([8, 8, 8, 7], undefined, 100)]).action).toBe('increase-weight')
     const threeWorkingWithWarmup: Workout = {
       ...workoutWithSets([8, 8, 8], undefined, 100),
       sets: [{ id: 'warmup', exerciseId: bench.id, setType: 'warm-up', weight: 45, reps: 10 }, ...workoutWithSets([8, 8, 8], undefined, 100).sets],
     }
-    expect(recommendNext(bench, planned, [threeWorkingWithWarmup]).action).toBe('progress-reps')
+    expect(recommendNext(bench, planned, [threeWorkingWithWarmup]).action).toBe('increase-weight')
   })
 
   it('uses RPE only as supporting effort evidence when RIR is absent', () => {

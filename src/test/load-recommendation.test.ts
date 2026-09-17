@@ -25,9 +25,9 @@ describe('generated exercise load targets', () => {
     expect(loads[0].increments).toEqual([75, 60, 70, 65])
   })
 
-  it('holds demonstrated weight below the rep ceiling or with incomplete sets', () => {
+  it('holds below the rep ceiling but accepts top-range evidence from a partial session', () => {
     expect(recommend([history(65, 8)])).toMatchObject({ weight: 65, action: 'progress-reps' })
-    expect(recommend([history(65, 10, 2)])).toMatchObject({ weight: 65, action: 'progress-reps' })
+    expect(recommend([history(65, 10, 2)])).toMatchObject({ weight: 70, action: 'increase-weight' })
   })
 
   it('keeps the existing RIR priority over RPE and avoids increases near failure', () => {
@@ -118,10 +118,10 @@ describe('load prescription lifecycle', () => {
     })
   })
 
-  it('evaluates the final time-adjusted set count', () => {
+  it('keeps load evidence independent of the final time-adjusted set count', () => {
     const normal = generated([history(65, 10, 2)])
     const short = generated([history(65, 10, 2)], 10)
-    expect(normal.plannedExercises?.[0]).toMatchObject({ sets: 4, loadRecommendation: { weight: 65 } })
+    expect(normal.plannedExercises?.[0]).toMatchObject({ sets: 4, loadRecommendation: { weight: 70 } })
     expect(short.plannedExercises?.[0]).toMatchObject({ sets: 2, loadRecommendation: { weight: 70 } })
   })
 

@@ -320,10 +320,16 @@ export interface PlannedVsActualExercise {
   demonstratedWorkingLoad?: number
 }
 
+export interface MuscleTrainingState extends MuscleFeatures {
+  /** Product recovery guard, not a physiological readiness estimate. */
+  recovery: 'unknown' | 'recently-trained' | 'available' | 'high-recent-volume'
+}
+
 export interface TrainingState {
   asOf: string
+  unit: WeightUnit
   exercises: ExerciseFeatures[]
-  muscles: MuscleFeatures[]
+  muscles: MuscleTrainingState[]
 }
 
 export type WorkoutFindingCategory = 'muscle-coverage' | 'volume' | 'redundancy' | 'movement-pattern' | 'ordering' | 'duration' | 'goal-alignment'

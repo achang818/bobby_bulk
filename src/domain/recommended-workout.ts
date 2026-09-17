@@ -1,14 +1,13 @@
 import { MINUTES_PER_EXERCISE_TRANSITION, MINUTES_PER_WORKING_SET } from './adaptation'
 import { isExerciseAvailable } from './equipment'
 import { findExerciseCandidates } from './exercise-intelligence'
-import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
+import { deriveTrainingState, exerciseTrainingState, muscleTrainingState, isMuscleOpportunity } from './training-state'
 import { hasHypertrophyGoal, resolveMusclePriorities, sameMuscle } from './muscle-priorities'
 import { SECONDARY_SET_CONTRIBUTION, stimulusForMuscle, workoutMuscleStimulus } from './muscle-stimulus'
 import { classifyPreference } from './states'
-import { recommendExerciseLoad } from './load-recommendation'
-import { displayWeight } from './units'
+import { recommendExerciseLoadFromState } from './load-recommendation'
 import { createPlannedExercise } from './workout-session'
-import type { AvailableLoad, Exercise, ExerciseFeatures, MuscleFeatures, PlanningAuthority, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
+import type { AvailableLoad, Exercise, ExerciseFeatures, MuscleFeatures, PlanningAuthority, TrainingState, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
 
 const PLANNING_HORIZON_OPPORTUNITIES = 3
 // Product construction budgets, not universal exercise or volume requirements.
@@ -35,6 +34,7 @@ export interface RecommendedWorkout {
 type MuscleTarget = {
   muscle: string
   rank: number
+  opportunityRank?: number
   desiredFrequency: number
   volumeWeight: number
   features: MuscleFeatures
@@ -51,18 +51,22 @@ type SelectedExercise = { exercise: Exercise; target: MuscleTarget; sets: number
  * happened, and context establishes what can be done today.
  */
 export function generateRecommendedWorkout(input: RecommendedWorkoutInput): RecommendedWorkout {
-  const asOf = input.asOf ?? new Date().toISOString().slice(0, 10)
-  // The generator accepts raw saved history. Keep recorded external weights
-  // distinct from effective body mass, and compare history in one display unit.
-  input = { ...input, history: input.history.map((workout) => ({
-    ...workout, unit: input.preferences.weightUnit,
-    sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, input.preferences.weightUnit) })),
-  })) }
-  const targets = chooseMuscleTargets(input, asOf)
-  const selected = selectExercises(targets, input, asOf, DEFAULT_EXERCISE_BUDGET)
+  return generateFromTrainingState(resolveTrainingInput(input))
+}
+
+type TrainingInput = Omit<RecommendedWorkoutInput, 'history' | 'asOf'> & { trainingState: TrainingState }
+
+function resolveTrainingInput(input: RecommendedWorkoutInput): TrainingInput {
+  const { history, asOf = new Date().toISOString().slice(0, 10), ...context } = input
+  return { ...context, trainingState: deriveTrainingState(input.exercises, history, asOf, input.preferences.weightUnit, resolveMusclePriorities(input.preferences).orderedMuscles) }
+}
+
+function generateFromTrainingState(input: TrainingInput): RecommendedWorkout {
+  const targets = chooseMuscleTargets(input)
+  const selected = selectExercises(targets, input, DEFAULT_EXERCISE_BUDGET)
   const plannedExercises = fitToTime(selected.slice(0, targetLimit(input.todaysContext.availableMinutes)), input.todaysContext.availableMinutes).map((planned) => ({
     ...planned,
-    loadRecommendation: recommendExerciseLoad(input.exercises.find((exercise) => exercise.id === planned.exerciseId)!, planned, input.history, input.availableLoads, input.preferences.weightUnit, asOf),
+    loadRecommendation: recommendExerciseLoadFromState(input.exercises.find((exercise) => exercise.id === planned.exerciseId)!, planned, exerciseTrainingState(input.trainingState, planned.exerciseId), input.trainingState.unit, input.availableLoads),
   }))
   const includedExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
   // Keep focus in allocation order, not accidental compound-first logger order.
@@ -76,7 +80,7 @@ export function generateRecommendedWorkout(input: RecommendedWorkoutInput): Reco
       ? `A shorter workout to fit your ${input.todaysContext.availableMinutes}-minute limit.`
       : `Only ${plannedExercises.length} suitable ${plannedExercises.length === 1 ? 'movement fits' : 'movements fit'} your recent training, equipment, goals, and exercise choices. Extra overlapping work has not been added just to fill the session.`
     : undefined
-  const reasons = uniqueReasons([...selectionReasons(targets, finalSelection, input, asOf), ...(sessionNote ? [sessionNote] : [])])
+  const reasons = uniqueReasons([...selectionReasons(targets, finalSelection, input), ...(sessionNote ? [sessionNote] : [])])
   const workout: WorkoutTemplate = {
     id: 'recommended-workout',
     name: 'Recommended workout',
@@ -91,11 +95,14 @@ export function generateRecommendedWorkout(input: RecommendedWorkoutInput): Reco
 
 /** Replace one preview slot without editing preferences, saved plans, or other slots. */
 export function skipRecommendedExercise(input: RecommendedWorkoutInput, current: RecommendedWorkout, exerciseId: string, skippedIds: readonly string[] = []): { recommendation: RecommendedWorkout; message: string } {
+  return skipFromTrainingState(resolveTrainingInput(input), current, exerciseId, skippedIds)
+}
+
+function skipFromTrainingState(input: TrainingInput, current: RecommendedWorkout, exerciseId: string, skippedIds: readonly string[]): { recommendation: RecommendedWorkout; message: string } {
   const original = input.exercises.find((exercise) => exercise.id === exerciseId)
   const slots = current.workout.plannedExercises ?? []
   const slot = slots.find((item) => item.exerciseId === exerciseId)
   if (!original || !slot) return { recommendation: current, message: '' }
-  const asOf = input.asOf ?? new Date().toISOString().slice(0, 10)
   const others = slots.filter((item) => item !== slot).map((item) => input.exercises.find((exercise) => exercise.id === item.exerciseId)!)
   const replacement = findExerciseCandidates({
     exercise: original, exercises: input.exercises, goals: input.preferences.goals,
@@ -104,14 +111,14 @@ export function skipRecommendedExercise(input: RecommendedWorkoutInput, current:
     constraints: { ...input.todaysContext, excludedExerciseIds: [...skippedIds, ...slots.map((item) => item.exerciseId)], requireSameCategory: true },
   }).find(({ exercise, roleMatch, compatibility }) => roleMatch === 'preserved' && compatibility !== 'weak'
     && matchesGoals(exercise, input.preferences)
-    && exercise.primaryMuscles.every((muscle) => isMuscleOpportunity(calculateMuscleFeatures(muscle, input.exercises, input.history, asOf)))
+    && exercise.primaryMuscles.every((muscle) => isMuscleOpportunity(muscleTrainingState(input.trainingState, muscle)))
     && !others.some((other) => other.type === exercise.type && other.movementPattern === exercise.movementPattern
       && other.primaryAction === exercise.primaryAction && other.primaryMuscles.some((muscle) => exercise.primaryMuscles.some((target) => sameMuscle(muscle, target)))))?.exercise
   const plannedExercises = slots.flatMap((item) => {
     if (item !== slot) return [item]
     if (!replacement) return []
     const next = { ...createPlannedExercise(replacement.id, item.order, replacement), sets: item.sets, setType: item.setType }
-    return [{ ...next, loadRecommendation: recommendExerciseLoad(replacement, next, input.history, undefined, input.preferences.weightUnit, asOf) }]
+    return [{ ...next, loadRecommendation: recommendExerciseLoadFromState(replacement, next, exerciseTrainingState(input.trainingState, replacement.id), input.trainingState.unit) }]
   }).map((item, order) => item.order === order ? item : { ...item, order })
   const message = replacement ? `Switched ${original.name} to ${replacement.name} for this workout.`
     : `No suitable alternative to ${original.name} fits your current settings and recent training. Removed it from this workout.`
@@ -128,10 +135,10 @@ export function skipRecommendedExercise(input: RecommendedWorkoutInput, current:
 }
 
 /** Chooses productive direct-muscle opportunities before choosing exercises. */
-function chooseMuscleTargets(input: RecommendedWorkoutInput, asOf: string): MuscleTarget[] {
+function chooseMuscleTargets(input: TrainingInput): MuscleTarget[] {
   const profile = resolveMusclePriorities(input.preferences)
   const prioritized = profile.orderedMuscles.flatMap((muscle, rank) => {
-    const features = calculateMuscleFeatures(muscle, input.exercises, input.history, asOf)
+    const features = muscleTrainingState(input.trainingState, muscle)
     const desiredFrequency = profile.desiredFrequency(muscle, PLANNING_HORIZON_OPPORTUNITIES)
     if (!isMuscleOpportunity(features)) return []
     const explicit = profile.explicitMuscles.some((item) => sameMuscle(item, muscle))
@@ -151,7 +158,7 @@ function chooseMuscleTargets(input: RecommendedWorkoutInput, asOf: string): Musc
     .flatMap((exercise) => exercise.primaryMuscles))
     .filter((muscle) => !profile.orderedMuscles.some((priority) => sameMuscle(priority, muscle)))
     .flatMap((muscle): MuscleTarget[] => {
-      const features = calculateMuscleFeatures(muscle, input.exercises, input.history, asOf)
+      const features = muscleTrainingState(input.trainingState, muscle)
       if (!isMuscleOpportunity(features)) return []
       return [{ muscle, rank: profile.orderedMuscles.length, desiredFrequency: 0, volumeWeight: 1, features,
         score: allocationScore(0, false, 0, features), emphasis: false,
@@ -159,20 +166,13 @@ function chooseMuscleTargets(input: RecommendedWorkoutInput, asOf: string): Musc
       }]
     })
   return [...prioritized, ...broader].sort((left, right) => Number(right.emphasis) - Number(left.emphasis)
-    || right.score - left.score || left.rank - right.rank || left.muscle.localeCompare(right.muscle))
-}
-
-function isMuscleOpportunity(features: MuscleFeatures) {
-  // Apply the same conservative recent-work guard to priority and broader work.
-  // Frequency guidance affects emphasis; it is not a recovery veto.
-  if (features.daysSinceTrained !== undefined && features.daysSinceTrained <= 1) return false
-  return !(features.volumeState === 'high recent volume' && features.frequency7Days > 0)
+    || right.score - left.score || left.rank - right.rank || left.muscle.localeCompare(right.muscle)).map((target, opportunityRank) => ({ ...target, opportunityRank }))
 }
 
 function allocationScore(rank: number, explicit: boolean, desiredFrequency: number, features: MuscleFeatures) {
   const unmetOpportunities = Math.max(0, desiredFrequency - features.frequency7Days)
   const daysSinceTrained = Math.min(features.daysSinceTrained ?? 7, 14)
-  const workloadAdjustment = features.volumeState === 'low recent volume' ? 8 : features.volumeState === 'moderate recent volume' ? 0 : -12
+  const workloadAdjustment = features.volumeState === 'low recent volume' ? 8 : features.volumeState === 'high recent volume' ? -12 : 0
   // Explicit ordering is dominant, but unmet exposure and time since direct
   // work can surface a lower-ranked muscle with a clearer opportunity.
   const frequencyAdjustment = desiredFrequency > 0 && features.frequency7Days >= desiredFrequency ? -40 : 0
@@ -194,15 +194,15 @@ function allocationReason(muscle: string, source: string, desiredFrequency: numb
  * Historical features remain direct-only; this loop only credits supporting
  * overlap accumulated by exercises selected for today's workout.
  */
-function selectExercises(targets: MuscleTarget[], input: RecommendedWorkoutInput, asOf: string, limit: number): SelectedExercise[] {
+function selectExercises(targets: MuscleTarget[], input: TrainingInput, limit: number): SelectedExercise[] {
   const selectedIds = new Set<string>()
   const selected: SelectedExercise[] = []
   const emphasis = targets.filter((target) => target.emphasis)
   const coverage = targets.filter((target) => !target.emphasis)
   while (selected.length < limit) {
     const stimulus = workoutMuscleStimulus(selected)
-    const choice = chooseNextExercise(emphasis, selected, selectedIds, stimulus, input, asOf)
-      ?? chooseNextExercise(coverage, selected, selectedIds, stimulus, input, asOf)
+    const choice = chooseNextExercise(emphasis, selected, selectedIds, stimulus, input)
+      ?? chooseNextExercise(coverage, selected, selectedIds, stimulus, input)
     if (!choice) break
     const { exercise, target } = choice
     const sets = allocatedSets({ exercise, target })
@@ -213,13 +213,13 @@ function selectExercises(targets: MuscleTarget[], input: RecommendedWorkoutInput
 }
 
 /** Explain only the movements and set counts that survive time adaptation. */
-function selectionReasons(targets: MuscleTarget[], selected: SelectedExercise[], input: RecommendedWorkoutInput, asOf: string) {
+function selectionReasons(targets: MuscleTarget[], selected: SelectedExercise[], input: TrainingInput) {
   const reasons = selected.flatMap(({ exercise, target }, index) => {
     const earlier = selected.slice(0, index)
     const supportingCompound = earlier.find(({ exercise: other }) => other.type === 'compound' && other.secondaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)))
     return [target.reason, ...(supportingCompound && target.emphasis && !earlier.some((item) => item.exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)))
       ? [`${supportingCompound.exercise.name} provides supporting ${target.muscle} work, but ${target.muscle} remains a high priority, so ${exercise.name} was added.`]
-      : calculateExerciseFeatures(exercise, input.history, asOf).progressionState === 'progressing'
+      : exerciseTrainingState(input.trainingState, exercise.id).progressionState === 'progressing'
         ? [`Kept ${exercise.name} because its recent working-set performance is progressing.`] : [])]
   })
   const finalStimulus = workoutMuscleStimulus(selected)
@@ -235,10 +235,10 @@ function selectionReasons(targets: MuscleTarget[], selected: SelectedExercise[],
 // Below this, another normal exercise default would only be token volume.
 const MINIMUM_USEFUL_REMAINING_STIMULUS = 0.5
 
-function chooseNextExercise(targets: MuscleTarget[], selected: SelectedExercise[], selectedIds: Set<string>, stimulus: ReturnType<typeof workoutMuscleStimulus>, input: RecommendedWorkoutInput, asOf: string) {
+function chooseNextExercise(targets: MuscleTarget[], selected: SelectedExercise[], selectedIds: Set<string>, stimulus: ReturnType<typeof workoutMuscleStimulus>, input: TrainingInput) {
   const candidates = input.exercises
     .filter((exercise) => !selectedIds.has(exercise.id) && isAvailable(exercise, input.todaysContext, input.preferences) && matchesGoals(exercise, input.preferences)
-      && exercise.primaryMuscles.every((muscle) => isMuscleOpportunity(calculateMuscleFeatures(muscle, input.exercises, input.history, asOf))))
+      && exercise.primaryMuscles.every((muscle) => isMuscleOpportunity(muscleTrainingState(input.trainingState, muscle))))
     .flatMap((exercise) => targets
       .filter((target) => exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle))
         && remainingNeed(target, stimulusForMuscle(stimulus, target.muscle).effectiveContribution) >= MINIMUM_USEFUL_REMAINING_STIMULUS
@@ -246,7 +246,7 @@ function chooseNextExercise(targets: MuscleTarget[], selected: SelectedExercise[
       .map((target) => ({ exercise, target })))
   if (!candidates.length) return undefined
   return candidates.sort((left, right) => exerciseUtility(right.exercise, right.target, targets, stimulus) - exerciseUtility(left.exercise, left.target, targets, stimulus)
-    || exerciseSelectionOrder(left.exercise, right.exercise, input, asOf)
+    || exerciseSelectionOrder(left.exercise, right.exercise, input)
     || left.target.rank - right.target.rank)[0]
 }
 
@@ -256,9 +256,9 @@ function exerciseUtility(exercise: Exercise, primaryTarget: MuscleTarget, target
     const direct = exercise.primaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)) ? sets : 0
     const supporting = exercise.secondaryMuscles.some((muscle) => sameMuscle(muscle, target.muscle)) ? sets * SECONDARY_SET_CONTRIBUTION : 0
     const useful = Math.min(remainingNeed(target, stimulusForMuscle(stimulus, target.muscle).effectiveContribution), direct + supporting)
-    // Priority ordering stays dominant; broad compound coverage breaks ties
-    // between otherwise useful choices rather than displacing the top target.
-    return total + Math.max(0, useful) * (target.emphasis ? 1000 / (1 + target.rank) : Math.max(1, target.score))
+    // Honor the history-aware opportunity order established before selection.
+    // Supporting compound coverage can break ties between useful movements.
+    return total + Math.max(0, useful) * (target.emphasis ? 1000 / (1 + (target.opportunityRank ?? target.rank)) : Math.max(1, target.score))
   }, 0)
 }
 
@@ -282,13 +282,13 @@ function isRedundantForTarget(candidate: Exercise, target: MuscleTarget, selecte
     && exercise.primaryAction === candidate.primaryAction)
 }
 
-function exerciseSelectionOrder(left: Exercise, right: Exercise, input: RecommendedWorkoutInput, asOf: string) {
+function exerciseSelectionOrder(left: Exercise, right: Exercise, input: TrainingInput) {
   const leftPreference = classifyPreference(left.id, input.preferences)
   const rightPreference = classifyPreference(right.id, input.preferences)
   const preference = preferenceRank(rightPreference) - preferenceRank(leftPreference)
   if (preference) return preference
-  const leftFeatures = calculateExerciseFeatures(left, input.history, asOf)
-  const rightFeatures = calculateExerciseFeatures(right, input.history, asOf)
+  const leftFeatures = exerciseTrainingState(input.trainingState, left.id)
+  const rightFeatures = exerciseTrainingState(input.trainingState, right.id)
   const progression = progressionRank(rightFeatures) - progressionRank(leftFeatures)
   if (progression) return progression
   // Useful history favors continuity. Recent use alone never creates a penalty.
@@ -308,7 +308,7 @@ function fitToTime(selected: SelectedExercise[], availableMinutes: number | unde
     .map((item, order) => ({
       ...createPlannedExercise(item.exercise.id, order, item.exercise),
       sets: item.sets,
-      targetRank: item.target.emphasis ? item.target.rank : Number.MAX_SAFE_INTEGER,
+      targetRank: item.target.emphasis ? (item.target.opportunityRank ?? item.target.rank) : Number.MAX_SAFE_INTEGER,
     }))
   if (availableMinutes === undefined) return planned.map(({ targetRank: _targetRank, ...exercise }) => exercise)
   let estimatedMinutes = estimateMinutes(planned)

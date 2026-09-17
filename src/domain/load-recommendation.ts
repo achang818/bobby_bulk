@@ -1,18 +1,22 @@
 import { equipmentTagFor, exerciseEquipmentOptions } from './equipment'
-import { recommendNext } from './progression'
-import { availableLoadsInUnit, displayWeight } from './units'
-import { compareWorkoutChronology } from './workout-session'
-import type { AvailableLoad, Exercise, ExerciseLoadRecommendation, PlannedExercise, WeightUnit, Workout } from './models'
+import { recommendFromWorkingSets } from './progression'
+import { availableLoadsInUnit } from './units'
+import { deriveTrainingState, exerciseTrainingState } from './training-state'
+import type { AvailableLoad, Exercise, ExerciseFeatures, ExerciseLoadRecommendation, PlannedExercise, WeightUnit, Workout } from './models'
 
 /** Apply existing progression rules to the final generated prescription. */
 export function recommendExerciseLoad(exercise: Exercise, planned: PlannedExercise, history: Workout[], availableLoads: AvailableLoad[] | undefined, unit: WeightUnit, asOf: string): ExerciseLoadRecommendation {
+  const state = deriveTrainingState([exercise], history, asOf, unit)
+  return recommendExerciseLoadFromState(exercise, planned, exerciseTrainingState(state, exercise.id), unit, availableLoads)
+}
+
+/** No raw history queries: use the latest direct working performance in the state. */
+export function recommendExerciseLoadFromState(exercise: Exercise, planned: PlannedExercise, state: ExerciseFeatures, unit: WeightUnit, availableLoads?: AvailableLoad[]): ExerciseLoadRecommendation {
   const choose = (reason: string): ExerciseLoadRecommendation => ({ kind: 'choose-load', unit, reason })
   const equipment = equipmentTagFor(exercise)
   if (exerciseEquipmentOptions(exercise).length > 1) return choose('Choose a starting load for the equipment you are using. Past logs do not identify which equipment variant was used.')
-  const latest = history.filter((workout) => workout.status !== 'in-progress' && workout.date <= asOf
-    && workout.sets.some((set) => set.exerciseId === exercise.id && set.setType === 'working'))
-    .sort((a, b) => compareWorkoutChronology(b, a))[0]
-  const working = latest?.sets.filter((set) => set.exerciseId === exercise.id && set.setType === 'working') ?? []
+  const latest = state.mostRecentPerformance
+  const working = latest?.workingSets ?? []
   // Legacy logs may omit loadType even for catalog assistance/bodyweight movements.
   const needsSetup = equipment === 'bodyweight' || equipment === 'pull-up-bar' || /assisted|dip bars/i.test(`${exercise.name} ${exercise.equipment}`)
   if (needsSetup || working.some((set) => set.loadType && set.loadType !== 'external')) {
@@ -22,8 +26,7 @@ export function recommendExerciseLoad(exercise: Exercise, planned: PlannedExerci
     return choose('No usable working-set history yet. Choose a manageable starting load for the rep range.')
   }
   const loads = availableLoadsInUnit(availableLoads, unit)
-  const normalized = { ...latest, unit, sets: working.map((set) => ({ ...set, weight: displayWeight(set.weight, latest.unit, unit) })) }
-  const result = recommendNext(exercise, planned, [normalized], loads, unit)
+  const result = recommendFromWorkingSets(exercise, planned, working.map((set) => ({ ...set, exerciseId: exercise.id })), loads, unit)
   if (result.action === 'start-here') return choose(result.reasons[0])
   const profile = loads?.find((load) => load.equipment === equipment)
   const weight = profile ? profile.increments.filter((load) => load <= result.weight).at(-1) : result.weight
