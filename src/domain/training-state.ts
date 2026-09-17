@@ -1,7 +1,7 @@
 import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { sameMuscle } from './muscle-priorities'
 import { displayWeight } from './units'
-import type { Exercise, MuscleTrainingState, TrainingState, WeightUnit, Workout } from './models'
+import type { Exercise, ExerciseFeatures, MuscleFeatures, MuscleTrainingState, TrainingState, WeightUnit, Workout } from './models'
 
 /**
  * Deterministic history boundary. Missing status/unit/prescription are supported
@@ -43,4 +43,27 @@ export function exerciseTrainingState(state: TrainingState, exerciseId: string) 
 
 export function isMuscleOpportunity(features: MuscleTrainingState) {
   return features.recovery === 'unknown' || features.recovery === 'available'
+}
+
+/** Shared boundary for callers supplying a precomputed snapshot. Never rederive it downstream. */
+export function resolveTrainingState(exercises: Exercise[], history: Workout[], asOf: string, unit: WeightUnit, priorities: string[], supplied?: TrainingState): TrainingState {
+  if (!supplied) return deriveTrainingState(exercises, history, asOf, unit, priorities)
+  if (supplied.asOf !== asOf || supplied.unit !== unit) throw new Error('TrainingState date/unit must match the recommendation request.')
+  for (const exercise of exercises) exerciseTrainingState(supplied, exercise.id)
+  for (const muscle of [...exercises.flatMap((exercise) => exercise.primaryMuscles), ...priorities]) muscleTrainingState(supplied, muscle)
+  return supplied
+}
+
+/** Latest direct working effort; RIR takes precedence over RPE on each set. */
+export function hasNearFailureEvidence(features: ExerciseFeatures): boolean {
+  return features.mostRecentPerformance?.workingSets.some((set) => set.rir !== undefined ? set.rir <= 1 : set.rpe !== undefined && set.rpe >= 9) ?? false
+}
+
+/** Opportunity ordering only, never an aggregate readiness/fatigue estimate. */
+export function muscleOpportunityScore(features: MuscleFeatures, rank: number, explicit: boolean, desiredFrequency: number) {
+  const unmet = Math.max(0, desiredFrequency - features.frequency7Days)
+  const days = Math.min(features.daysSinceTrained ?? 7, 14)
+  const volume = features.volumeState === 'low recent volume' ? 8 : features.volumeState === 'high recent volume' ? -12 : 0
+  const supplied = desiredFrequency > 0 && features.frequency7Days >= desiredFrequency ? -40 : 0
+  return (explicit ? 100 : 60) - rank * 5 + unmet * 12 + days + volume + supplied
 }

@@ -236,6 +236,6 @@ describe('recommendation evidence', () => {
     const history = [workout('a', '2026-09-01', [working('1', 160, 12, { rir: 2 }), working('2', 160, 12, { rir: 2 }), working('3', 160, 12, { rir: 2 })])]
     const recommendation = evaluatePlan(plan, exercises, history, { ...defaultPreferences, goals: ['Build muscle'] }, '2026-09-09').find((item) => item.type === 'PROGRESSION')
     expect(recommendation?.reasons).toContain('Last prescription was completed: 3/3 working sets. Best working set recorded at 2 RIR.')
-    expect(recommendation?.progression?.reasons[0]).toContain('at 2 RIR')
+    expect(recommendation?.progression?.reasons.join(' ')).toContain('at 2 RIR')
   })
 })

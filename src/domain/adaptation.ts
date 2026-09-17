@@ -3,7 +3,8 @@ import { isExerciseAvailable } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { planExerciseIds, plannedExercisesFor } from './workout-session'
-import type { Exercise, ExerciseCandidate, ExerciseRecommendationCandidate, TodaysContext, UserPreferences, WorkoutPlan } from './models'
+import { muscleTrainingState, isMuscleOpportunity, muscleOpportunityScore } from './training-state'
+import type { Exercise, ExerciseCandidate, ExerciseRecommendationCandidate, TrainingState, TodaysContext, UserPreferences, WorkoutPlan } from './models'
 
 // The limit protects a familiar workout from unnecessary churn; it is contextual, not universal.
 export const MAX_CONTEXTUAL_SUBSTITUTIONS = 2
@@ -70,7 +71,7 @@ export function estimateTypicalDuration(plan: WorkoutPlan, exercises: Exercise[]
   return planExercises.reduce((minutes, planned) => minutes + planned.sets * MINUTES_PER_WORKING_SET, 0) + planExercises.length * MINUTES_PER_EXERCISE_TRANSITION
 }
 
-export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], availableMinutes: number | undefined, goalCriticalExerciseIds: string[] = []): ExerciseRecommendationCandidate[] {
+export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], availableMinutes: number | undefined, goalCriticalExerciseIds: string[] = [], state?: TrainingState, preferences?: UserPreferences): ExerciseRecommendationCandidate[] {
   if (availableMinutes === undefined) return []
   const typicalDuration = estimateTypicalDuration(plan, exercises)
   if (availableMinutes >= typicalDuration) return []
@@ -81,7 +82,18 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
     return exercise ? [{ exercise, planned }] : []
   })
   const trace = buildTrace('adapt-available-time')
-  const orderedExercises = [...planExercises].sort((a, b) => protectionScore(a.exercise, goalCritical) - protectionScore(b.exercise, goalCritical))
+  const profile = resolveMusclePriorities(preferences)
+  const protection = (exercise: Exercise) => {
+    if (!state) return protectionScore(exercise, goalCritical)
+    const muscles = exercise.primaryMuscles.map((muscle) => muscleTrainingState(state, muscle))
+    if (muscles.some((muscle) => !isMuscleOpportunity(muscle))) return -1
+    return Math.max(0, ...muscles.map((muscle) => {
+      const rank = profile.rankOf(muscle.muscle)
+      return rank === undefined ? 0 : muscleOpportunityScore(muscle, rank, profile.explicitMuscles.includes(muscle.muscle), profile.desiredFrequency(muscle.muscle, 3))
+    }))
+  }
+  const orderedExercises = [...planExercises].sort((a, b) => protection(a.exercise) - protection(b.exercise)
+    || Number(a.exercise.type === 'compound') - Number(b.exercise.type === 'compound') || a.planned.order - b.planned.order || a.exercise.id.localeCompare(b.exercise.id))
   const modifications = new Map<string, ExerciseRecommendationCandidate>()
   const removals: ExerciseRecommendationCandidate[] = []
   let minutesToSave = typicalDuration - availableMinutes
@@ -89,10 +101,9 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
   for (const { exercise, planned } of orderedExercises) {
     if (minutesToSave <= 0) break
     const reducibleSets = Math.max(0, planned.sets - 1)
-    if (reducibleSets === 0) continue
     const setsToRemove = Math.min(reducibleSets, Math.ceil(minutesToSave / MINUTES_PER_WORKING_SET))
     const remainingSets = planned.sets - setsToRemove
-    modifications.set(exercise.id, {
+    if (setsToRemove > 0) modifications.set(exercise.id, {
       id: `time-modify-${plan.id}-${exercise.id}`,
       type: 'MODIFY',
       exerciseId: exercise.id,
@@ -102,11 +113,20 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
       trace,
     })
     minutesToSave -= setsToRemove * MINUTES_PER_WORKING_SET
+    // Exhaust a lower-value opportunity before taking sets from a higher one.
+    // Equal-value slots retain the existing reduce-before-remove behavior.
+    if (state && minutesToSave > 0 && orderedExercises.some((item) => protection(item.exercise) > protection(exercise))) {
+      modifications.delete(exercise.id)
+      removals.push({ id: `time-remove-${plan.id}-${exercise.id}`, type: 'REMOVE', exerciseId: exercise.id, score: 4,
+        reasons: [`Remove ${exercise.name} to fit today's ${availableMinutes}-minute limit while preserving higher-ranked muscle opportunities.`], trace })
+      minutesToSave -= remainingSets * MINUTES_PER_WORKING_SET + MINUTES_PER_EXERCISE_TRANSITION
+    }
   }
 
   if (minutesToSave > 0) {
     for (const { exercise, planned } of orderedExercises) {
       if (minutesToSave <= 0) break
+      if (removals.some((item) => item.exerciseId === exercise.id)) continue
       const remainingSets = modifications.get(exercise.id)?.modifiedSets ?? planned.sets
       // A full removal supersedes a prior set reduction for the same exercise.
       modifications.delete(exercise.id)
@@ -115,7 +135,7 @@ export function adaptWorkoutForTime(plan: WorkoutPlan, exercises: Exercise[], av
         type: 'REMOVE',
         exerciseId: exercise.id,
         score: 4,
-        reasons: [`Remove ${exercise.name} as a last resort to fit today's ${availableMinutes}-minute limit.`, exercise.type === 'isolation' ? 'Isolation work is prioritized for removal before compound work.' : 'Compound work is retained until lower-priority options are exhausted.'],
+        reasons: [`Remove ${exercise.name} as a last resort to fit today's ${availableMinutes}-minute limit.`, state ? 'Recent direct training and ordered muscle opportunities determine which work is trimmed first.' : 'Lower-priority work is trimmed first.'],
         trace,
       })
       minutesToSave -= remainingSets * MINUTES_PER_WORKING_SET + MINUTES_PER_EXERCISE_TRANSITION

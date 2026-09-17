@@ -1,13 +1,12 @@
-import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
-import { recommendNext } from './progression'
-import { recommendExerciseLoad } from './load-recommendation'
+import { deriveTrainingState, exerciseTrainingState, muscleTrainingState, isMuscleOpportunity } from './training-state'
+import { recommendExerciseLoadFromState } from './load-recommendation'
 import { isExerciseAvailable } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { buildTrace, compareRecommendations } from './rules'
 import { classifyPreference, rejectedKeepCount } from './states'
 import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
-import type { AvailableLoad, Exercise, ExerciseRecommendationCandidate, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan } from './models'
+import type { AvailableLoad, ExerciseFeatures, MuscleFeatures, TrainingState, Exercise, ExerciseRecommendationCandidate, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan } from './models'
 
 // A single workout plan has no weekly split/calendar context. Three is a
 // conservative opportunity ceiling for detecting sparse recent exposure; the
@@ -17,6 +16,12 @@ export const PLAN_FREQUENCY_OPPORTUNITIES = 3
 type PriorityAddReason = 'missing-slot' | 'low-volume' | 'low-frequency'
 
 export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = [], context?: TodaysContext): ExerciseRecommendationCandidate[] {
+  const state = deriveTrainingState(exercises, history, asOf ?? new Date().toISOString().slice(0, 10), preferences.weightUnit, resolveMusclePriorities(preferences).orderedMuscles)
+  return evaluatePlanFromState(plan, exercises, state, preferences, availableLoads, decisions, context)
+}
+
+/** Candidate producer; the composition boundary supplies all historical evidence. */
+export function evaluatePlanFromState(plan: WorkoutPlan, exercises: Exercise[], state: TrainingState, preferences: UserPreferences, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = [], context?: TodaysContext): ExerciseRecommendationCandidate[] {
   const recommendations: ExerciseRecommendationCandidate[] = []
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const planExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
@@ -32,16 +37,16 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
 
   for (const { exercise, planned } of planExercises) {
     if (context && !isExerciseAvailable(exercise, context)) continue
-    const features = calculateExerciseFeatures(exercise, history, asOf)
-    const load = context?.availableEquipment === undefined ? undefined : recommendExerciseLoad(exercise, planned, history, availableLoads, preferences.weightUnit, asOf ?? new Date().toISOString().slice(0, 10))
-    const progression = load?.kind === 'target'
-      ? { exercise, sets: planned.sets, repRange: planned.repRange, weight: load.weight, action: load.action, confidence: load.confidence, reasons: [load.reason] }
-      : recommendNext(exercise, planned, history, availableLoads, preferences.weightUnit)
+    const features = exerciseTrainingState(state, exercise.id)
+    const load = recommendExerciseLoadFromState(exercise, planned, features, state.unit, availableLoads)
+    const progression = load.kind === 'target'
+      ? { exercise, sets: planned.sets, repRange: planned.repRange, weight: load.weight, action: load.action, confidence: load.confidence, reasons: [load.reason, historicalPerformanceEvidence(features)] }
+      : undefined
     const goalAligned = preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))
     const preferenceState = classifyPreference(exercise.id, preferences, decisions)
-    if (load?.kind !== 'choose-load' && features.sessionsPerformed > 0 && progression.action !== 'start-here') {
+    if (progression && features.sessionsPerformed > 0) {
       const trace = buildTrace('double-progression')
-      recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: [...progression.reasons, historicalPerformanceEvidence(features)], trace })
+      recommendations.push({ id: `progression-${plan.id}-${exercise.id}`, type: 'PROGRESSION', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 4 : 3, progression, reasons: progression.reasons, trace })
     }
     if (features.sessionsPerformed >= 2 && goalAligned && preferenceState !== 'excluded' && ['progressing', 'stable'].includes(features.progressionState)) {
       const trace = buildTrace('keep-stable-exercise')
@@ -61,7 +66,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
         preferences,
         decisions,
       })
-      const alternative = replacement.selectedCandidate
+      const alternative = replacement.rankedCandidates.find((candidate) => candidate.exercise.primaryMuscles.every((muscle) => isMuscleOpportunity(muscleTrainingState(state, muscle))))
       if (alternative) {
         const specific = replacementReason === 'stalled' && isSpecificIsolationReplacement(alternative.exercise, exercise)
         const trace = buildTrace(replacementReason === 'regressing' ? 'replace-on-regression' : specific ? 'replace-on-stall-specific' : 'replace-on-stall')
@@ -71,7 +76,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
   }
 
   for (const [priorityRank, priority] of priorityProfile.orderedMuscles.entries()) {
-    const muscle = calculateMuscleFeatures(priority, exercises, history, asOf)
+    const muscle = muscleTrainingState(state, priority)
     const represented = planExercises.some(({ exercise }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === priority.toLowerCase()))
     const normalizedPriority = priority.toLowerCase()
     const priorityCandidates = exercises.filter((exercise) => !planExerciseIds.has(exercise.id) && classifyPreference(exercise.id, preferences, decisions) !== 'excluded' && exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && (preferences.goals.length === 0 || exercise.goals.some((goal) => preferences.goals.includes(goal as UserPreferences['goals'][number])) || (hasHypertrophyGoal(preferences.goals) && exercise.goals.includes('Build muscle'))))
@@ -81,13 +86,20 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
     const candidate = priorityCandidates.find((exercise) => !context || isExerciseAvailable(exercise, context))
     const desiredFrequency = priorityProfile.desiredFrequency(priority, PLAN_FREQUENCY_OPPORTUNITIES)
     const addReason = priorityAddReason(muscle, desiredFrequency)
+    const existing = planExercises.find(({ exercise, planned }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && planned.setType === 'working' && planned.sets < exercise.defaultSets)
+    if (represented && existing && addReason && muscle.historyConfidence !== 'none') {
+      const trace = buildTrace('modify-for-priority-volume')
+      recommendations.push({ id: `priority-modify-${plan.id}-${existing.exercise.id}`, type: 'MODIFY', exerciseId: existing.exercise.id,
+        modifiedSets: Math.min(existing.exercise.defaultSets, existing.planned.sets + 1), score: Math.max(3, 6 - priorityRank),
+        reasons: [`${priority} is priority #${priorityRank + 1} with ${muscle.rolling7DaySets} recent direct sets and ${muscle.frequency7Days} direct sessions. Consider one additional working set in the existing slot.`, 'Your saved prescription changes only if you accept.'], trace })
+    }
     if (!represented && candidate && addReason && !priorityAddExerciseIds.has(candidate.id)) {
       // The trace taxonomy has no separate "missing slot" rule. Reusing the
       // volume-hypertrophy trace here is intentional: it supports establishing
       // direct work, while the explicit reason below makes clear this is not
       // inferred historical volume or performance evidence.
       const trace = buildTrace(addReason === 'low-frequency' ? 'add-for-priority-frequency' : 'add-for-priority-volume')
-      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: addReason === 'missing-slot' ? Math.max(4, 5 - Math.min(priorityRank, 2)) : Math.max(3, 5 - Math.min(priorityRank, 2)), reasons: [`${priority} is priority #${priorityRank + 1}.`, ...(addReason === 'missing-slot' ? ['No direct working-set history or planned slot exists for this priority yet.'] : []), trace.principleDescription, ...(addReason === 'low-frequency' ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : [])], trace })
+      recommendations.push({ id: `add-${plan.id}-${candidate.id}`, type: 'ADD', exerciseId: candidate.id, score: Math.max(3, 5 - Math.min(priorityRank, 2)) + (addReason !== 'missing-slot' && isMuscleOpportunity(muscle) ? 1 : 0), reasons: [`${priority} is priority #${priorityRank + 1}: ${muscle.rolling7DaySets} direct working sets across ${muscle.frequency7Days} recent sessions.`, ...(addReason === 'missing-slot' ? ['No direct working-set history or planned slot exists for this priority yet.'] : []), trace.principleDescription, ...(addReason === 'low-frequency' ? [`Its recent frequency is below the ${desiredFrequency}-exposure priority target when practical.`] : [])], trace })
       priorityAddExerciseIds.add(candidate.id)
     }
   }
@@ -98,14 +110,14 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
  * Priority evidence has a deterministic order. A missing direct slot is not
  * measured low volume: the history model intentionally reports it as unknown.
  */
-function priorityAddReason(muscle: ReturnType<typeof calculateMuscleFeatures>, desiredFrequency: number): PriorityAddReason | undefined {
+function priorityAddReason(muscle: MuscleFeatures, desiredFrequency: number): PriorityAddReason | undefined {
   if (muscle.historyConfidence === 'none') return 'missing-slot'
   if (muscle.volumeState === 'low recent volume') return 'low-volume'
   if (muscle.frequency14Days > 0 && muscle.frequency14Days < desiredFrequency * 2) return 'low-frequency'
   return undefined
 }
 
-function historicalPerformanceEvidence(features: ReturnType<typeof calculateExerciseFeatures>): string {
+function historicalPerformanceEvidence(features: ExerciseFeatures): string {
   const latest = features.mostRecentPerformance
   if (!latest) return 'No completed working-set performance is available yet.'
   const completion = latest.plannedSets === undefined

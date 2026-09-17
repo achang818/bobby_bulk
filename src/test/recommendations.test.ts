@@ -51,7 +51,7 @@ describe('final recommendation pipeline', () => {
     expect(targeted).toEqual([expect.objectContaining({ type: 'REMOVE', change: { kind: 'remove', exerciseId: bench.id } })])
   })
 
-  it('deduplicates only identical actions, retaining the first deterministic candidate', () => {
+  it('chooses one canonical replacement independently of insertion order', () => {
     const trace = { ruleId: 'test' as never, principleId: 'test', principleDescription: 'test', evidenceLevel: 'D' as const, source: { name: 'test' } }
     const candidates: RecommendationCandidate[] = [
       { id: 'first', type: 'REPLACE', exerciseId: 'bench', alternativeExerciseId: 'machine-press', score: 6, reasons: ['first'], trace },
@@ -59,7 +59,8 @@ describe('final recommendation pipeline', () => {
       { id: 'different', type: 'REPLACE', exerciseId: 'bench', alternativeExerciseId: 'dumbbell-press', score: 6, reasons: ['different'], trace },
     ]
 
-    expect(resolveConcreteConflicts(candidates).map((candidate) => candidate.id)).toEqual(['first', 'different'])
+    expect(resolveConcreteConflicts(candidates).map((candidate) => candidate.id)).toEqual(['different'])
+    expect(resolveConcreteConflicts([...candidates].reverse())).toEqual(resolveConcreteConflicts(candidates))
   })
 
   it('is deterministic, ordered by priority, and emits the stable final schema', () => {

@@ -1,7 +1,7 @@
 import { equipmentTagFor, exerciseEquipmentOptions } from './equipment'
 import { recommendFromWorkingSets } from './progression'
 import { availableLoadsInUnit } from './units'
-import { deriveTrainingState, exerciseTrainingState } from './training-state'
+import { deriveTrainingState, exerciseTrainingState, hasNearFailureEvidence } from './training-state'
 import type { AvailableLoad, Exercise, ExerciseFeatures, ExerciseLoadRecommendation, PlannedExercise, WeightUnit, Workout } from './models'
 
 /** Apply existing progression rules to the final generated prescription. */
@@ -28,6 +28,13 @@ export function recommendExerciseLoadFromState(exercise: Exercise, planned: Plan
   const loads = availableLoadsInUnit(availableLoads, unit)
   const result = recommendFromWorkingSets(exercise, planned, working.map((set) => ({ ...set, exerciseId: exercise.id })), loads, unit)
   if (result.action === 'start-here') return choose(result.reasons[0])
+  if (result.action === 'increase-weight' && hasNearFailureEvidence(state)) {
+    const inRange = working.filter((set) => set.reps >= planned.repRange.min && set.reps <= planned.repRange.max)
+    result.weight = Math.max(...inRange.map((set) => set.weight))
+    result.action = 'progress-reps'
+    result.confidence = 'low'
+    result.reasons = ['Keep the demonstrated load: the latest working performance includes near-failure effort.']
+  }
   const profile = loads?.find((load) => load.equipment === equipment)
   const weight = profile ? profile.increments.filter((load) => load <= result.weight).at(-1) : result.weight
   if (weight === undefined) return choose('No available weight fits the demonstrated load. Choose a manageable setup before logging.')

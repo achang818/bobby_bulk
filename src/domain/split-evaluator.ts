@@ -2,13 +2,14 @@ import { evaluateWorkout } from './workout-evaluator'
 import { plannedExercisesFor } from './workout-session'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { buildTrace } from './rules'
-import type { Exercise, RecommendationCandidate, Split, SplitAssessment, SplitEvaluation, SplitFinding, SplitPriorityOpportunity, UserPreferences, WorkoutEvaluation, WorkoutTemplate } from './models'
+import { muscleTrainingState, isMuscleOpportunity } from './training-state'
+import type { Exercise, RecommendationCandidate, Split, SplitAssessment, SplitEvaluation, SplitFinding, SplitPriorityOpportunity, TrainingState, UserPreferences, WorkoutEvaluation, WorkoutTemplate } from './models'
 
 type EvaluatedWorkout = { workout: WorkoutTemplate; evaluation: WorkoutEvaluation; splitIndex: number }
 type MuscleAllocation = { workoutCount: number; plannedWorkingSets: number; indexes: number[]; workoutNames: string[] }
 
 /** Evaluates structure without assuming an ideal split or weekly schedule. */
-export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercises: Exercise[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitEvaluation {
+export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercises: Exercise[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>, state?: TrainingState): SplitEvaluation {
   const entries: EvaluatedWorkout[] = []
   const missing: string[] = []
   split.workoutIds.forEach((id, splitIndex) => {
@@ -27,7 +28,7 @@ export function evaluateSplit(split: Split, workouts: WorkoutTemplate[], exercis
   if (!entries.length) return { splitId: split.id, workouts: [], muscleSummary: [], priorityOpportunities: [], findings, overallAssessment: insufficientAssessment(preferences) }
   const availableWorkoutOpportunities = Math.min(entries.length, split.intendedFrequency ?? entries.length)
   const priorityOpportunities = priorityOpportunitiesFor(entries, muscles, preferences, availableWorkoutOpportunities)
-  findings.push(...recoveryFindings(muscles), ...distributionFindings(muscleSummary), ...redundancyFindings(entries, exercises), ...complementarityFindings(entries), ...priorityFindings(priorityOpportunities, muscleSummary, preferences))
+  findings.push(...recoveryFindings(muscles), ...distributionFindings(muscleSummary), ...redundancyFindings(entries, exercises), ...complementarityFindings(entries), ...priorityFindings(priorityOpportunities, muscleSummary, preferences, state))
   return { splitId: split.id, workouts: entries.map((entry) => entry.evaluation), muscleSummary, priorityOpportunities, findings, overallAssessment: assessmentFor(entries, muscleSummary, findings, preferences) }
 }
 
@@ -82,10 +83,15 @@ function complementarityFindings(entries: EvaluatedWorkout[]): SplitFinding[] {
   return findings
 }
 
-function priorityFindings(opportunities: SplitPriorityOpportunity[], summary: SplitEvaluation['muscleSummary'], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): SplitFinding[] {
+function priorityFindings(opportunities: SplitPriorityOpportunity[], summary: SplitEvaluation['muscleSummary'], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>, state?: TrainingState): SplitFinding[] {
   if (!opportunities.length) return []
   const findings: SplitFinding[] = []
   for (const item of opportunities) {
+    const recent = state ? muscleTrainingState(state, item.muscle) : undefined
+    if (item.status === 'under-served' && recent && (!isMuscleOpportunity(recent) || recent.frequency7Days >= item.desiredFrequency)) {
+      findings.push(finding('frequency', 'info', `${item.muscle} has recent direct work`, `This split has ${item.plannedFrequency} planned direct opportunities. Actual training includes ${recent.frequency7Days} recent direct sessions and ${recent.rolling7DaySets} working sets; defer frequency expansion while recent exposure is sufficient or recovery is pending.`, [`Recovery: ${recent.recovery}`, 'Planned structure and completed work are separate evidence.']))
+      continue
+    }
     if (item.plannedFrequency === 0) {
       findings.push(finding('goal-alignment', item.rank < 3 ? 'warning' : 'info', `${item.muscle} has no direct split work`, `No workout in this split has direct planned work for priority #${item.rank + 1} ${item.muscle}. Secondary involvement is not counted as direct volume.`, []))
       continue
@@ -135,17 +141,20 @@ function distributionFor(indexes: number[], splitLength: number): SplitPriorityO
 }
 
 /** Produces advisory structural candidates; applying one never mutates a split. */
-export function splitAlignmentCandidates(split: Split, workouts: WorkoutTemplate[], exercises: Exercise[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>): RecommendationCandidate[] {
-  const evaluation = evaluateSplit(split, workouts, exercises, preferences)
+export function splitAlignmentCandidates(split: Split, workouts: WorkoutTemplate[], exercises: Exercise[], preferences?: Pick<UserPreferences, 'goals' | 'priorities'>, state?: TrainingState): RecommendationCandidate[] {
+  const evaluation = evaluateSplit(split, workouts, exercises, preferences, state)
   const trace = buildTrace('adjust-split-for-priority')
   return evaluation.priorityOpportunities.flatMap((opportunity) => {
     const issue = opportunity.status === 'under-served' ? 'under-frequency' : opportunity.distribution === 'concentrated' ? 'concentrated-opportunities' : undefined
     if (!issue) return []
+    const recent = state ? muscleTrainingState(state, opportunity.muscle) : undefined
+    // Planned structure is not a calendar. Never add planned exposures to actual
+    // sessions: they may be the very same work, including work outside this split.
     const id = `split-${split.id}-${opportunity.muscle.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-${issue}`
     const reason = issue === 'under-frequency'
       ? `${opportunity.muscle} is priority #${opportunity.rank + 1}, but this split provides ${opportunity.plannedFrequency} direct ${opportunity.plannedFrequency === 1 ? 'opportunity' : 'opportunities'} versus a bounded target of ${opportunity.desiredFrequency}.`
       : `${opportunity.muscle} reaches its direct-opportunity target, but its planned opportunities are concentrated instead of distributed through this split.`
-    return [{ id, type: 'SPLIT' as const, splitId: split.id, muscle: opportunity.muscle, score: Math.max(3, 5 - Math.min(opportunity.rank, 2)), desiredFrequency: opportunity.desiredFrequency, plannedFrequency: opportunity.plannedFrequency, distribution: opportunity.distribution, issue, reasons: [reason, 'This is advisory: Bobby will not rewrite your split.'], trace }]
+    return [{ id, type: 'SPLIT' as const, splitId: split.id, muscle: opportunity.muscle, score: Math.max(3, 5 - Math.min(opportunity.rank, 2)), desiredFrequency: opportunity.desiredFrequency, plannedFrequency: opportunity.plannedFrequency, distribution: opportunity.distribution, issue, reasons: [recent ? `${reason} Actual recent direct frequency: ${recent.frequency7Days} sessions; ${recent.rolling7DaySets} working sets.` : reason, 'This is advisory: Bobby will not rewrite your split.'], trace }]
   })
 }
 

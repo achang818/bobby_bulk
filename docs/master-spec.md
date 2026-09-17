@@ -1521,6 +1521,79 @@ unit normalization, deterministic ordering, and no-history/legacy fallbacks.
 Automatic split generation, LLM behavior, and long-term periodization are outside
 this milestone.
 
+### Shared TrainingState -> Decision Engine contract
+
+The existing `generateRecommendations` composition boundary derives or receives
+exactly one TrainingState for the request's as-of date and display unit. It passes
+that snapshot to plan evaluation, load guidance, time adaptation, split alignment,
+and semantic conflict resolution. Recommended Workout uses the same TrainingState resolution and
+interpretation. The app shares its memoized snapshot across Recommended
+Workout, My Plans, and split overview; completing, editing, or deleting history
+invalidates that snapshot. A supplied snapshot must match date, unit, and catalog
+coverage, and is authoritative: downstream producers must not peek at changed raw
+history behind it.
+
+The pipeline remains:
+
+```text
+Completed history -> TrainingState -> RecommendationCandidate producers
+                  -> resolveConcreteConflicts -> ordered Recommendation objects
+```
+
+Raw saved history enters this boundary before display/effective-bodyweight
+transformations. State owns direct volume/frequency, recency, recovery, workload
+trend, confidence, valid exercise performances, progression, and known completion.
+Raw history is reserved for evidence not represented in state; it must not be used
+to recalculate equivalent facts inside candidate producers.
+
+Planning authority remains explicit. `recommended` may construct a temporary
+session. `user-plan` proposes changes against the saved baseline and never silently
+rewrites it. Legacy plans default to user ownership. State affects the existing
+recommendation types as follows:
+
+* PROGRESSION uses valid direct working evidence. Recent direct recovery constraints
+  or meaningful near-failure effort convert it to an explained KEEP. Near-failure
+  means RIR <= 1 or, only when that set has no RIR, RPE >= 9 in the latest ordinary
+  working performance. Other set types cannot trigger this rule. Both generated
+  load targets and plan advice respect effort beyond just the single best set.
+* Productive progression supports KEEP and defeats optional exercise variation.
+* A measured undertrained priority strengthens an ADD; a small existing slot may
+  receive a bounded one-set MODIFY up to the exercise default. These are optional
+  proposals, suppressed when direct targets were recently trained or recent direct
+  volume is high. No-history missing coverage remains distinct from measured low
+  volume.
+* Hard equipment substitutions/removals override preference and historical
+  continuity. Time-driven MODIFY/REMOVE orders work by the same muscle opportunity
+  facts, trimming recovering or lower-ranked work first. Compatible equipment
+  substitution and time reduction can coexist for the same original slot.
+* SPLIT advice and frequency findings distinguish actual recent training (including
+  outside work) from planned exposures. Do not sum them: completed work may be an
+  execution of the planned split. Adequate actual frequency or pending recovery
+  defers optional frequency expansion; the split remains unchanged.
+
+Conflict resolution uses explicit precedence rather than a combined readiness or
+fatigue score. Required removal defeats KEEP/PROGRESSION/MODIFY/replacement for the
+same slot; equipment defeats optional alternatives; recovery defeats optional
+volume; near-failure effort defeats automatic progression; productive performance
+defeats optional variation; and hard time limits defeat optional additions or set
+increases. Alternative replacements and competing set prescriptions cannot both
+win for one slot. Rank feasible optional work deterministically within remaining
+time, considering required removals/reductions already selected.
+
+`generateRecommendationsWithTrace` exposes the same pipeline's state, original
+candidates, final recommendations, and suppression records for tests/debugging.
+Each suppressed or converted candidate records its stable ID, a reason code,
+human-readable explanation, and a winning/replacement candidate ID when applicable.
+Canonical tie-breaking must not depend on producer insertion order. The final
+Recommendation schema and evidence-rule traces remain intact; diagnostic state
+is not a new recommendation architecture or a user-facing Bobby score.
+
+Regression coverage includes shared-state reuse, all listed semantic precedence
+rules, candidate permutations, equipment plus time adaptation, actual split
+frequency, history lifecycle changes, units, and conservative legacy/no-history
+behavior. This milestone does not introduce learning, LLMs, automatic splits,
+periodization, deloads, benchmarks, or scheduling.
+
 ### Entities and relationships
 
 Core entities:

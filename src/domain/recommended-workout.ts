@@ -1,7 +1,7 @@
 import { MINUTES_PER_EXERCISE_TRANSITION, MINUTES_PER_WORKING_SET } from './adaptation'
 import { isExerciseAvailable } from './equipment'
 import { findExerciseCandidates } from './exercise-intelligence'
-import { deriveTrainingState, exerciseTrainingState, muscleTrainingState, isMuscleOpportunity } from './training-state'
+import { resolveTrainingState, muscleOpportunityScore, exerciseTrainingState, muscleTrainingState, isMuscleOpportunity } from './training-state'
 import { hasHypertrophyGoal, resolveMusclePriorities, sameMuscle } from './muscle-priorities'
 import { SECONDARY_SET_CONTRIBUTION, stimulusForMuscle, workoutMuscleStimulus } from './muscle-stimulus'
 import { classifyPreference } from './states'
@@ -21,6 +21,7 @@ export interface RecommendedWorkoutInput {
   todaysContext: TodaysContext
   availableLoads?: AvailableLoad[]
   asOf?: string
+  trainingState?: TrainingState
 }
 
 export interface RecommendedWorkout {
@@ -54,11 +55,11 @@ export function generateRecommendedWorkout(input: RecommendedWorkoutInput): Reco
   return generateFromTrainingState(resolveTrainingInput(input))
 }
 
-type TrainingInput = Omit<RecommendedWorkoutInput, 'history' | 'asOf'> & { trainingState: TrainingState }
+type TrainingInput = Omit<RecommendedWorkoutInput, 'history' | 'asOf' | 'trainingState'> & { trainingState: TrainingState }
 
 function resolveTrainingInput(input: RecommendedWorkoutInput): TrainingInput {
-  const { history, asOf = new Date().toISOString().slice(0, 10), ...context } = input
-  return { ...context, trainingState: deriveTrainingState(input.exercises, history, asOf, input.preferences.weightUnit, resolveMusclePriorities(input.preferences).orderedMuscles) }
+  const { history, asOf = input.trainingState?.asOf ?? new Date().toISOString().slice(0, 10), trainingState, ...context } = input
+  return { ...context, trainingState: resolveTrainingState(input.exercises, history, asOf, input.preferences.weightUnit, resolveMusclePriorities(input.preferences).orderedMuscles, trainingState) }
 }
 
 function generateFromTrainingState(input: TrainingInput): RecommendedWorkout {
@@ -149,7 +150,7 @@ function chooseMuscleTargets(input: TrainingInput): MuscleTarget[] {
       desiredFrequency,
       volumeWeight: profile.volumeWeight(muscle),
       features,
-      score: allocationScore(rank, explicit, desiredFrequency, features),
+      score: muscleOpportunityScore(features, rank, explicit, desiredFrequency),
       emphasis: features.frequency7Days < desiredFrequency,
       reason: allocationReason(muscle, source, desiredFrequency, features),
     }]
@@ -161,22 +162,12 @@ function chooseMuscleTargets(input: TrainingInput): MuscleTarget[] {
       const features = muscleTrainingState(input.trainingState, muscle)
       if (!isMuscleOpportunity(features)) return []
       return [{ muscle, rank: profile.orderedMuscles.length, desiredFrequency: 0, volumeWeight: 1, features,
-        score: allocationScore(0, false, 0, features), emphasis: false,
+        score: muscleOpportunityScore(features, 0, false, 0), emphasis: false,
         reason: `Added work for ${muscle} broadens the session beyond your priority muscles while respecting recent training.`,
       }]
     })
   return [...prioritized, ...broader].sort((left, right) => Number(right.emphasis) - Number(left.emphasis)
     || right.score - left.score || left.rank - right.rank || left.muscle.localeCompare(right.muscle)).map((target, opportunityRank) => ({ ...target, opportunityRank }))
-}
-
-function allocationScore(rank: number, explicit: boolean, desiredFrequency: number, features: MuscleFeatures) {
-  const unmetOpportunities = Math.max(0, desiredFrequency - features.frequency7Days)
-  const daysSinceTrained = Math.min(features.daysSinceTrained ?? 7, 14)
-  const workloadAdjustment = features.volumeState === 'low recent volume' ? 8 : features.volumeState === 'high recent volume' ? -12 : 0
-  // Explicit ordering is dominant, but unmet exposure and time since direct
-  // work can surface a lower-ranked muscle with a clearer opportunity.
-  const frequencyAdjustment = desiredFrequency > 0 && features.frequency7Days >= desiredFrequency ? -40 : 0
-  return (explicit ? 100 : 60) - rank * 5 + unmetOpportunities * 12 + daysSinceTrained + workloadAdjustment + frequencyAdjustment
 }
 
 function allocationReason(muscle: string, source: string, desiredFrequency: number, features: MuscleFeatures) {
