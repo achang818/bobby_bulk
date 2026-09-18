@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react'
 import { LoadTarget } from './LoadTarget'
-import type { WorkoutAnalysis, SessionExerciseAssessment } from '../domain/workout-analysis'
+import type { WorkoutAnalysis, ExerciseOutcome } from '../domain/workout-analysis'
 
 const completionLabels = { completed: 'Rep target met', partial: 'Partially logged', 'below target': 'Outside rep target', 'not started': 'Not logged', unplanned: 'Additional movement' }
 
@@ -16,10 +16,11 @@ export function WorkoutSummary({ analysis, justCompleted = false }: { analysis: 
         {outsideTargets > 0 && <p className="summary-note">{outsideTargets} {outsideTargets === 1 ? 'exercise has' : 'exercises have'} enough sets logged but not enough sets within the prescribed rep range.</p>}
         {highlights.length > 0 ? <div className="summary-highlights">{highlights.map((exercise) => <div className={`summary-finding ${exercise.signal}`} key={exercise.exerciseId}><strong>{exercise.name}</strong><p>{exercise.message}</p></div>)}</div> : <p className="summary-note">{analysis.exercises.some((exercise) => exercise.signal === 'baseline') ? 'You’ve added a new working-set baseline for future comparisons.' : 'Your session is recorded. Open the exercise details to review completion and comparable performance.'}</p>}
         <details className="summary-details"><summary>Exercise details ({analysis.exercises.length})</summary>{analysis.exercises.map((exercise) => <ExerciseResult key={exercise.exerciseId} exercise={exercise} />)}</details>
+        {analysis.recommendationOutcomes.length > 0 && <details className="summary-details"><summary>Coaching changes ({analysis.recommendationOutcomes.length})</summary>{analysis.recommendationOutcomes.map((outcome) => <div className="summary-exercise" key={outcome.changeId}><strong>{outcome.source === 'time' ? 'Time adjustment' : outcome.source === 'equipment' ? 'Equipment adjustment' : outcome.source === 'generated-substitution' ? 'Exercise alternative' : outcome.source === 'rejected-recommendation' ? 'Declined suggestion' : outcome.source === 'dismissed-recommendation' ? 'Dismissed suggestion' : 'Session suggestion'}</strong><p>{outcome.reason}</p></div>)}</details>}
         <div className="summary-next"><strong>For your next session</strong><p>{analysis.nextSession}</p></div>
     </section>
 }
 
-function ExerciseResult({ exercise }: { exercise: SessionExerciseAssessment }) {
-    return <div className="summary-exercise"><strong>{exercise.name}</strong><span>{exercise.plannedSets === undefined ? `${exercise.completedSets} working sets logged` : `${exercise.completedSets} / ${exercise.plannedSets} sets logged`} · {completionLabels[exercise.completion]}</span><LoadTarget recommendation={exercise.loadRecommendation} /><p>{exercise.message}</p>{exercise.comparison && <small>{exercise.comparison.comparableSets} comparable working-set pairs{exercise.previousSessionId ? ' from the previous session' : ''}. {exercise.comparison.reasons.join(' ')}</small>}</div>
+function ExerciseResult({ exercise }: { exercise: ExerciseOutcome }) {
+    return <div className="summary-exercise"><strong>{exercise.name}</strong><span>{exercise.plannedSets === undefined ? `${exercise.completedSets} working sets logged` : `${exercise.completedSets} / ${exercise.plannedSets} sets logged`} · {completionLabels[exercise.completion]}</span>{exercise.prescription && <small>Original rep range: {exercise.prescription.repRange.min}–{exercise.prescription.repRange.max}</small>}<LoadTarget recommendation={exercise.loadRecommendation} /><p>{exercise.message}</p>{exercise.observations.map((observation) => <small key={observation}>{observation}</small>)}{exercise.demonstratedWorkingLoad !== undefined && <small>Demonstrated in range: {exercise.demonstratedWorkingLoad} {exercise.unit}</small>}{exercise.comparison && <small>{exercise.comparison.comparableSets} comparable working-set pairs{exercise.previousSessionId ? ' from the previous session' : ''}. {exercise.comparison.reasons.join(' ')}</small>}</div>
 }

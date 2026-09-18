@@ -1,5 +1,6 @@
-import type { Exercise, Gym, LoggedSet, Recommendation, PlannedExercise, SetType, TodaysContext, WeightUnit, WorkoutSession, WorkoutTemplate } from './models'
+import type { Exercise, Gym, LoggedSet, Recommendation, RecommendationDecision, PlannedExercise, SetType, TodaysContext, WeightUnit, WorkoutSession, WorkoutTemplate } from './models'
 import { contextForGym } from './gyms'
+import { affectedExerciseIds, captureRecommendationChange, decisionForRecommendation, latestPlanDecisions, samePrescription } from './session-provenance'
 import { displayWeight } from './units'
 
 const defaultRepRange = { min: 8, max: 12 }
@@ -20,19 +21,29 @@ export function synchronizePlan(plan: WorkoutTemplate, exercises: Exercise[] = [
   return { ...plan, plannedExercises, exerciseIds: plannedExercises.map((exercise) => exercise.exerciseId) }
 }
 
-export function resolveWorkoutForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[] = []): WorkoutTemplate {
+export function resolveWorkoutForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[] = [], unit: WeightUnit = 'lb'): WorkoutTemplate {
   const resolved = plannedExercisesFor(plan, exercises)
     .flatMap((planned) => {
       const applicable = recommendations.filter((item) => item.target.kind === 'exercise' && item.target.exerciseId === planned.exerciseId)
       if (applicable.some((item) => item.change.kind === 'remove')) return []
       const resolved = applicable.reduce((current, recommendation) => {
-        if (recommendation.change.kind === 'replace') return { ...current, exerciseId: recommendation.change.toExerciseId }
+        if (recommendation.change.kind === 'replace') {
+          const replacementId = recommendation.change.toExerciseId
+          const replacement = exercises.find((exercise) => exercise.id === replacementId)
+          return { ...current, exerciseId: recommendation.change.toExerciseId, repRange: { ...(replacement?.repRange ?? current.repRange) }, loadRecommendation: undefined }
+        }
+        if (recommendation.change.kind === 'progression' && recommendation.change.recommendedLoad !== undefined && Number.isFinite(recommendation.change.recommendedLoad)) return { ...current, repRange: { ...recommendation.change.repRange }, loadRecommendation: { kind: 'target' as const, weight: recommendation.change.recommendedLoad ?? 0, unit, action: 'progress-reps' as const, confidence: 'medium' as const, reason: recommendation.reason } }
         if (recommendation.change.kind === 'modify') return { ...current, ...recommendation.change.changes }
         return current
       }, planned)
       return [{ ...resolved, repRange: { ...resolved.repRange } }]
     })
     .map((planned, order) => ({ ...planned, order }))
+  for (const recommendation of recommendations) if (recommendation.change.kind === 'add') {
+    const change = recommendation.change
+    if (resolved.some((slot) => slot.exerciseId === change.exerciseId)) continue
+    resolved.push({ exerciseId: change.exerciseId, order: resolved.length, sets: change.sets, repRange: { ...change.repRange }, setType: 'working' })
+  }
   return synchronizePlan({ ...plan, plannedExercises: resolved }, exercises)
 }
 
@@ -96,8 +107,41 @@ export function captureSessionGym(session: WorkoutSession, gym: Gym, context: To
 }
 
 /** Shared app boundary: resolve contextual changes, then capture that exact session. */
-export function createWorkoutSessionForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[], unit: WeightUnit): WorkoutSession {
-  return createWorkoutSession(resolveWorkoutForToday(plan, recommendations, exercises), undefined, unit)
+export function createWorkoutSessionForToday(plan: WorkoutTemplate, recommendations: Recommendation[], exercises: Exercise[], unit: WeightUnit, decisions?: RecommendationDecision[]): WorkoutSession {
+  const latest = latestPlanDecisions(decisions ?? [], plan.id)
+  const selected = recommendations.filter((recommendation) => {
+    const decision = decisionForRecommendation(recommendation, latest, plan.id, unit)
+    if (recommendation.trace.ruleId === 'adapt-unavailable-equipment') return true
+    if (recommendation.trace.ruleId === 'adapt-available-time') return decision?.decision !== 'dismissed' && decision?.decision !== 'rejected'
+    if (!decisions) return true // Compatibility: caller already selected applicable changes.
+    return decision?.decision === 'accepted'
+  })
+  const before = plannedExercisesFor(plan, exercises)
+  const resolved = resolveWorkoutForToday(plan, selected, exercises, unit)
+  const session = createWorkoutSession(resolved, undefined, unit)
+  const after = session.plannedExercises ?? []
+  const records = selected.filter((item) => item.type !== 'KEEP' && item.type !== 'SPLIT').map((recommendation) => {
+    const decision = decisionForRecommendation(recommendation, latest, plan.id, unit)
+    // A mandatory contextual adaptation is not evidence that a rejected proposal
+    // was accepted. Retain the explicit rejection separately below.
+    return captureRecommendationChange(recommendation, decision?.prescriptionBefore ?? before, after, unit, true, decision?.decision === 'accepted' ? decision : undefined)
+  })
+  for (const decision of latest) {
+    if (!decision.recommendation || decision.planId !== plan.id || records.some((record) => record.decision?.id === decision.id)) continue
+    const affected = affectedExerciseIds(decision.recommendation)
+    const expected = (decision.prescriptionAfter ?? []).filter((slot) => affected.includes(slot.exerciseId))
+    const original = (decision.prescriptionBefore ?? []).filter((slot) => affected.includes(slot.exerciseId))
+    const change = decision.recommendation.change
+    const material = JSON.stringify(original) !== JSON.stringify(expected)
+    const resulting = after.filter((slot) => affected.includes(slot.exerciseId))
+    const stillPresent = change.kind === 'replace' ? after.some((slot) => slot.exerciseId === change.toExerciseId) && !after.some((slot) => slot.exerciseId === change.fromExerciseId)
+      : change.kind === 'add' ? after.some((slot) => slot.exerciseId === change.exerciseId)
+        : change.kind === 'remove' ? !after.some((slot) => slot.exerciseId === change.exerciseId)
+          : expected.length > 0 && expected.every((slot) => after.some((current) => samePrescription(slot, current)))
+    const applied = decision.decision === 'accepted' && material && stillPresent
+    records.push(captureRecommendationChange(decision.recommendation, original, resulting, decision.unit ?? unit, applied, decision))
+  }
+  return { ...session, prescriptionChanges: records }
 }
 
 /** Logging can include extra movements while the starting prescription stays intact. */
@@ -136,10 +180,13 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
     ...(raw.gym ? { gym: structuredClone(raw.gym) } : {}),
     ...(raw.context ? { context: structuredClone(raw.context) } : {}),
     ...(Array.isArray(raw.adaptationNotes) ? { adaptationNotes: raw.adaptationNotes.filter((note) => typeof note === 'string') } : {}),
+    ...(Array.isArray(raw.prescriptionChanges) ? { prescriptionChanges: structuredClone(raw.prescriptionChanges) } : {}),
     planningAuthority: raw.planningAuthority ?? 'user-plan',
-    plannedExercises: Array.isArray(raw.plannedExercises) ? raw.plannedExercises.map((exercise, index) => ({
-      ...createPlannedExercise(exercise.exerciseId ?? '', exercise.order ?? index), ...exercise, order: exercise.order ?? index, setType: exercise.setType ?? 'working',
-    })).filter((exercise) => exercise.exerciseId) : [],
+    // Incomplete historical snapshots cannot establish an original prescription.
+    plannedExercises: Array.isArray(raw.plannedExercises) ? raw.plannedExercises.filter((exercise) => exercise?.exerciseId
+      && Number.isFinite(exercise.sets) && exercise.sets > 0 && exercise.repRange
+      && Number.isFinite(exercise.repRange.min) && Number.isFinite(exercise.repRange.max) && exercise.repRange.min > 0 && exercise.repRange.max >= exercise.repRange.min)
+      .map((exercise, index) => structuredClone({ ...exercise, order: exercise.order ?? index, setType: exercise.setType ?? 'working' })) : [],
     ...(Array.isArray(raw.addedExercises) ? { addedExercises: raw.addedExercises.map((exercise, index) => ({
       ...createPlannedExercise(exercise.exerciseId, exercise.order ?? index), ...exercise,
       repRange: { ...(exercise.repRange ?? defaultRepRange) },

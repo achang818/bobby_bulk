@@ -101,6 +101,8 @@ export interface WorkoutSession {
   gym?: Gym
   context?: TodaysContext
   adaptationNotes?: string[]
+  /** Frozen causal record; outcomes are always re-derived from actual sets. */
+  prescriptionChanges?: SessionPrescriptionChange[]
   /** Whether this session came from Bobby's generated workout or a user-owned plan. */
   planningAuthority?: PlanningAuthority
   /** Snapshot of the plan when the session began; legacy history has none. */
@@ -330,6 +332,7 @@ export interface TrainingState {
   unit: WeightUnit
   exercises: ExerciseFeatures[]
   muscles: MuscleTrainingState[]
+  outcomes: import('./workout-analysis').PostWorkoutAnalysis[]
 }
 
 export type WorkoutFindingCategory = 'muscle-coverage' | 'volume' | 'redundancy' | 'movement-pattern' | 'ordering' | 'duration' | 'goal-alignment'
@@ -406,6 +409,24 @@ export interface RecommendationDecision {
   decision: RecommendationDecisionType
   /** Present on newly recorded decisions; omitted only by legacy local data. */
   timestamp?: string
+  /** New decisions retain the exact proposal and prescription they refer to. */
+  recommendation?: Recommendation
+  planId?: string
+  unit?: WeightUnit
+  prescriptionBefore?: PlannedExercise[]
+  prescriptionAfter?: PlannedExercise[]
+}
+
+export interface SessionPrescriptionChange {
+  id: string
+  source: 'accepted-recommendation' | 'selected-recommendation' | 'rejected-recommendation' | 'dismissed-recommendation' | 'equipment' | 'time' | 'generated-substitution'
+  recommendation?: Recommendation
+  decision?: RecommendationDecision
+  unit: WeightUnit
+  before: PlannedExercise[]
+  after: PlannedExercise[]
+  applied: boolean
+  reason: string
 }
 
 export type RecommendationTarget =

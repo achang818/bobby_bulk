@@ -197,9 +197,11 @@ export function saveTodaysContext(context: TodaysContext): TodaysContext {
   return context
 }
 
-export function saveRecommendationDecision(recommendation: Recommendation, decision: RecommendationDecisionType): RecommendationDecision[] {
+export function saveRecommendationDecision(recommendation: Recommendation, decision: RecommendationDecisionType, context: Pick<RecommendationDecision, 'planId' | 'unit' | 'prescriptionBefore' | 'prescriptionAfter'> = {}): RecommendationDecision[] {
   const decisions = [...loadRecommendationDecisions(), {
     id: crypto.randomUUID(),
+    ...structuredClone(context),
+    recommendation: structuredClone(recommendation),
     recommendationId: recommendation.id,
     recommendationType: recommendation.type,
     exerciseId: recommendationExerciseId(recommendation) ?? '',

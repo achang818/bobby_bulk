@@ -7,7 +7,7 @@ import { SECONDARY_SET_CONTRIBUTION, stimulusForMuscle, workoutMuscleStimulus } 
 import { classifyPreference } from './states'
 import { recommendExerciseLoadFromState } from './load-recommendation'
 import { createPlannedExercise } from './workout-session'
-import type { AvailableLoad, Exercise, ExerciseFeatures, MuscleFeatures, PlanningAuthority, TrainingState, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
+import type { AvailableLoad, Exercise, ExerciseFeatures, MuscleFeatures, PlanningAuthority, SessionPrescriptionChange, TrainingState, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from './models'
 
 const PLANNING_HORIZON_OPPORTUNITIES = 3
 // Product construction budgets, not universal exercise or volume requirements.
@@ -30,6 +30,7 @@ export interface RecommendedWorkout {
   targetMuscles: string[]
   reasons: string[]
   sessionNote?: string
+  prescriptionChanges?: SessionPrescriptionChange[]
 }
 
 type MuscleTarget = {
@@ -131,6 +132,8 @@ function skipFromTrainingState(input: TrainingInput, current: RecommendedWorkout
     return `${exercise.name}: ${item.sets} working sets for ${exercise.primaryMuscles.join(', ')}.`
   })
   return { message, recommendation: { ...current, targetMuscles, reasons, sessionNote,
+    prescriptionChanges: [...(current.prescriptionChanges ?? []).map((change) => change.after.some((item) => item.exerciseId === exerciseId) ? { ...change, applied: false } : change), structuredClone({ id: `generated-swap-${exerciseId}`, source: 'generated-substitution' as const,
+      unit: input.trainingState.unit, before: [slot], after: replacement ? plannedExercises.filter((item) => item.exerciseId === replacement.id) : [], applied: true, reason: message })],
     workout: { ...current.workout, plannedExercises, exerciseIds: plannedExercises.map((item) => item.exerciseId), focus: targetMuscles.join(' · ') || 'No suitable exercises', description: reasons.join(' ') },
   } }
 }

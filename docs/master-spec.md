@@ -1594,6 +1594,86 @@ frequency, history lifecycle changes, units, and conservative legacy/no-history
 behavior. This milestone does not introduce learning, LLMs, automatic splits,
 periodization, deloads, benchmarks, or scheduling.
 
+### Post-workout outcome analysis and closed-loop coaching
+
+`PostWorkoutAnalysis` is a deterministic, derived interpretation of a completed
+WorkoutSession. It contains the session identity/date, execution totals, exercise
+outcomes, meaningful findings, and recommendation outcomes. It is not persisted
+as another set ledger. Completed sessions remain canonical; reviewing or deriving
+TrainingState recomputes analysis from current saved history. Edits and deletions
+therefore invalidate earlier verdicts automatically. In-progress sessions receive
+no completed-session verdict.
+
+Each ExerciseOutcome preserves the original session prescription (sets, rep range,
+set type, and load target when present), actual ordinary working sets and units,
+completed/partial/skipped/ad-hoc status, target-range completion, observed load
+changes, demonstrated in-range load, comparison evidence, sufficiency/confidence,
+and deterministic observations. Missing historical prescriptions stay unknown;
+today's catalog supplies names, never a reconstructed original prescription.
+
+Execution facts are separate from judgments. Extra sets, a different load, or an
+ad-hoc movement are observations. Successfully performing a heavier load preserves
+that demonstrated performance and is not labeled failed adherence. Completing all
+sets and meeting all rep targets are distinct facts. Warm-up, drop, and failure
+sets cannot establish ordinary working-load progress. Missing sets contribute no
+completed direct volume and do not independently imply performance decline.
+
+Compare actual working sets using the existing set-preserving comparison and
+progression contract. One weaker comparable result is isolated underperformance;
+two consecutive comparable weaker results may establish repeated underperformance
+and regression. Contradictory direct set evidence cannot be overridden by total
+volume or estimated 1RM. Changed prescriptions or inadequate comparison evidence
+remain inconclusive. Do not invent explanations involving sleep, nutrition,
+illness, or physiological fatigue.
+
+The durable causal chain is:
+
+```text
+Recommendation snapshot -> explicit decision -> session prescription change
+                        -> actual execution -> derived outcome -> future TrainingState
+```
+
+New decisions preserve the exact recommendation payload, plan ID, unit, and
+relevant before/after prescriptions. At start, sessions capture prescription-change
+records with their origin: accepted/rejected/dismissed recommendation, automatic
+equipment/time adaptation, caller-selected change, or generated exercise swap.
+Each record retains its recommendation/decision IDs where available and whether
+it materially affected the final prescription. Previous acceptance of a stable
+recommendation ID must not authorize a changed load proposal. Legacy decisions
+without a proposal snapshot do not establish acceptance of a new prescription.
+
+Accepted progression captures its load target in the starting session, including
+when the saved plan itself has no load target. An ordinary working set at that
+load or heavier within the target rep range demonstrates it without requiring all
+prescribed sets. Attempting that load outside the range is not supported execution;
+choosing a lighter/different setup means the increase was not tested, rather than
+proof of inability. Accepted replacement/addition provenance survives changes
+already applied to the saved plan and records whether the resulting movement was
+performed, partly performed, or skipped. Rejected proposals are never credited as
+applied; any mandatory contextual adjustment has its own separately attributed
+record. Superseded intermediate generated swaps are not counted as skipped work.
+
+Context-driven removal is an intentional omission from the session prescription,
+not a skipped prescribed exercise. Execution alone does not distinguish voluntary
+skipping from accidental/partial completion; record the cause as unknown unless
+explicitly captured. Neither skipped work nor contextual omissions write preferred,
+recommend-less, or excluded preferences, and no implicit preference learning is
+introduced by this milestone. Explicit recommendation decisions remain distinct
+from these execution facts.
+
+TrainingState exposes rederived session outcomes alongside its real-set features.
+The summary and future coaching can inspect demonstrated recommendation loads,
+execution provenance, and isolated/repeated underperformance without counting
+analysis records as additional training. Generated sessions require no saved plan
+or accepted recommendation to receive a valid analysis. Session prescriptions and
+causal records stay frozen across reloads and later plan, catalog, preference, or
+history changes; actual-history edits only change the derived interpretation.
+
+The existing session review shows original targets, neutral execution observations,
+performance comparisons, and coaching-change outcomes. This is not a new analytics
+dashboard. No general-purpose ranking rules, LLM coaching, speculative recovery,
+deloads, periodization, automatic splits, scheduling, or benchmarking are introduced.
+
 ### Entities and relationships
 
 Core entities:

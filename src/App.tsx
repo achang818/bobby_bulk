@@ -17,9 +17,10 @@ import { evaluateSplit } from "./domain/split-evaluator";
 import { generateRecommendations, recommendationExerciseId } from "./domain/recommendations";
 import { generateRecommendedWorkout, skipRecommendedExercise, type RecommendedWorkout } from "./domain/recommended-workout";
 import { loadLocalFileSnapshot, restoreBrowserData, saveLocalFileSnapshot } from "./domain/local-file-sync";
- import { clearActiveWorkoutSession, loadActiveWorkoutSession, loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, latestRecommendationDecision, loadTodaysContext, deletePlan, deleteWorkout, persistWorkouts, saveActiveWorkoutSession, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
+ import { clearActiveWorkoutSession, loadActiveWorkoutSession, loadPlans, loadPreferences, loadSavedTemplates, loadWorkouts, loadGyms, loadRecommendationDecisions, loadTodaysContext, deletePlan, deleteWorkout, persistWorkouts, saveActiveWorkoutSession, savePlan, savePreferences, saveRecommendationDecision, saveWorkout, updateWorkout, saveTodaysContext, toggleSavedTemplate, } from "./domain/storage";
+import { affectedExerciseIds, decisionForRecommendation } from "./domain/session-provenance";
 import { applyAcceptedRecommendation } from "./domain/plan-actions";
-import { captureSessionGym, completeWorkoutSession, createPlannedExercise, createWorkoutSession, createWorkoutSessionForToday, planExerciseIds, resolveWorkoutForToday, sessionExercises, sessionLoadInput } from "./domain/workout-session";
+import { captureSessionGym, completeWorkoutSession, createPlannedExercise, createWorkoutSession, createWorkoutSessionForToday, planExerciseIds, plannedExercisesFor, resolveWorkoutForToday, sessionExercises, sessionLoadInput } from "./domain/workout-session";
 import { saveGyms } from "./domain/storage";
 import { convertWeight, displayWeight, effectiveLoad } from "./domain/units";
 import type { TrainingState, LoggedSet, Recommendation, TrainingGoal, UserPreferences, WeightUnit, Workout, WorkoutSession, WorkoutTemplate, Gym, RecommendationDecision, TodaysContext, Split, } from "./domain/models";
@@ -152,8 +153,8 @@ function App() {
     const activePlanExerciseIds = planExerciseIds(activePlan);
     const currentSplit = useMemo<Split | undefined>(() => plans.length ? { id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) } : undefined, [plans]);
     const planRecommendations = useMemo(() => generateRecommendations({ plan: activePlan, exercises, history: workouts, trainingState, preferences, todaysContext: coachingContext, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: activePlan.planningAuthority ?? "user-plan" }), [activePlan, currentSplit, plans, preferences, recommendationDecisions, coachingContext, workouts, trainingState]);
-    const sessionRecommendations = useMemo(() => planRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), [planRecommendations, recommendationDecisions]);
-    const resolvedPlan = useMemo(() => resolveWorkoutForToday(activePlan, sessionRecommendations, exercises), [activePlan, sessionRecommendations]);
+    const sessionRecommendations = useMemo(() => planRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && decisionForRecommendation(recommendation, recommendationDecisions, activePlan.id, preferences.weightUnit)?.decision !== "dismissed") || decisionForRecommendation(recommendation, recommendationDecisions, activePlan.id, preferences.weightUnit)?.decision === "accepted"), [planRecommendations, recommendationDecisions, activePlan.id, preferences.weightUnit]);
+    const resolvedPlan = useMemo(() => resolveWorkoutForToday(activePlan, sessionRecommendations, exercises, preferences.weightUnit), [activePlan, sessionRecommendations, preferences.weightUnit]);
     const workoutExerciseIds = useMemo(() => activeSession ? sessionExercises(activeSession).map((exercise) => exercise.exerciseId) : planExerciseIds(resolvedPlan), [activeSession, resolvedPlan]);
     const sessionPlannedExercises = useMemo(() => resolvedPlan.plannedExercises ?? [], [resolvedPlan]);
     const sessionSets = activeSession?.sets ?? [];
@@ -163,14 +164,14 @@ function App() {
         const exercise = exercises.find((item) => item.id === selectedExerciseId);
         if (!exercise)
             return { weight: "0", reps: "0", rir: "", rpe: "" };
-        const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && recommendationExerciseId(item) === selectedExerciseId && latestRecommendationDecision(item.id, recommendationDecisions) !== "dismissed")?.change;
+        const progression = planRecommendations.find((item) => item.type === "PROGRESSION" && recommendationExerciseId(item) === selectedExerciseId && !(["dismissed", "rejected"] as (string | undefined)[]).includes(decisionForRecommendation(item, recommendationDecisions, activePlan.id, preferences.weightUnit)?.decision))?.change;
         const prescription = activeSession ? sessionExercises(activeSession).find((item) => item.exerciseId === selectedExerciseId) : undefined;
         const latestSet = activeSession?.sets.filter((set) => set.exerciseId === selectedExerciseId).at(-1) ?? [...workouts].sort((a, b) => b.date.localeCompare(a.date) || (b.completedAt ?? "").localeCompare(a.completedAt ?? "")).flatMap((workout) => workout.sets.filter((set) => set.exerciseId === selectedExerciseId && set.setType === (prescription?.setType ?? "working")).map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, sessionUnit), }))).at(0);
         const repRange = prescription?.repRange ?? exercise.repRange;
         const suggestedLoad = progression?.kind === "progression" && progression.recommendedLoad ? displayWeight(progression.recommendedLoad, preferences.weightUnit, sessionUnit) : undefined;
         const savedInput = activeSession ? sessionLoadInput(activeSession, selectedExerciseId, sessionUnit) : undefined;
         return { weight: savedInput ?? String(suggestedLoad ?? latestSet?.weight ?? 0), reps: String(Math.min(repRange.max, Math.max(repRange.min, latestSet?.reps ?? repRange.min))), rir: "", rpe: "", };
-    }, [activeSession, planRecommendations, preferences.weightUnit, sessionUnit, recommendationDecisions, selectedExerciseId, workouts]);
+    }, [activeSession, activePlan.id, planRecommendations, preferences.weightUnit, sessionUnit, recommendationDecisions, selectedExerciseId, workouts]);
     const setInput = setInputOverrides[selectedExerciseId] ?? initialSetInput;
     const selectableExercises = exercises.filter((exercise) => exercise.name.toLowerCase().includes(exerciseSearch.trim().toLowerCase()));
     function updateSetInput(next: Partial<SetInput>) {
@@ -243,7 +244,7 @@ function App() {
             return;
         }
         const generatedRecommendations = generateRecommendations({ plan, exercises, history: workouts, trainingState, preferences, todaysContext: gymContext, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: "user-plan" });
-        const session = captureSessionGym(createWorkoutSessionForToday(plan, generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment" || (recommendation.trace.ruleId === "adapt-available-time" && latestRecommendationDecision(recommendation.id, recommendationDecisions) !== "dismissed") || latestRecommendationDecision(recommendation.id, recommendationDecisions) === "accepted"), exercises, preferences.weightUnit), currentGym, gymContext);
+        const session = captureSessionGym(createWorkoutSessionForToday(plan, generatedRecommendations, exercises, preferences.weightUnit, recommendationDecisions), currentGym, gymContext);
         session.adaptationNotes = generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment").map((recommendation) => recommendation.reason);
         if (!session.plannedExercises?.length && plan.id !== "empty-workout") { setStartNotice(`No exercises from ${plan.name} fit today's gym and time settings. Adjust those settings before starting. Your saved plan is unchanged.`); return; }
         setStartNotice('');
@@ -265,17 +266,20 @@ function App() {
         setActivePlan(recommended.workout);
         setSelectedExerciseId(recommendedExercises[0]?.exerciseId ?? exercises[0].id);
         setSetInputOverrides({});
-        setActiveSession(captureSessionGym(createWorkoutSession(recommended.workout, recommendedExercises, preferences.weightUnit), currentGym, gymContext));
+        setActiveSession(captureSessionGym({ ...createWorkoutSession(recommended.workout, recommendedExercises, preferences.weightUnit), prescriptionChanges: recommended.prescriptionChanges }, currentGym, gymContext));
         setShowLogger(true);
     }
     function handleRecommendationDecision(recommendation: Recommendation, decision: "accepted" | "rejected" | "dismissed") {
-        setRecommendationDecisions(saveRecommendationDecision(recommendation, decision));
+        const affected = affectedExerciseIds(recommendation);
+        const before = plannedExercisesFor(activePlan, exercises).filter((slot) => affected.includes(slot.exerciseId));
+        const after = decision === "accepted" ? plannedExercisesFor(resolveWorkoutForToday(activePlan, [recommendation], exercises, preferences.weightUnit)).filter((slot) => affected.includes(slot.exerciseId)) : before;
+        setRecommendationDecisions(saveRecommendationDecision(recommendation, decision, { planId: activePlan.id, unit: preferences.weightUnit, prescriptionBefore: before, prescriptionAfter: after }));
         if (decision !== "accepted")
             return;
         if (recommendation.trace.ruleId === "adapt-unavailable-equipment" || recommendation.trace.ruleId === "adapt-available-time") return;
         if (activePlan.planningAuthority === "recommended")
             return;
-        const updatedPlan = applyAcceptedRecommendation(activePlan, recommendation);
+        const updatedPlan = applyAcceptedRecommendation(activePlan, recommendation, exercises);
         if (JSON.stringify(updatedPlan) === JSON.stringify(activePlan))
             return;
         setActivePlan(updatedPlan);
@@ -293,7 +297,7 @@ function App() {
         {startNotice && <p className="session-size-note" role="alert">{startNotice}</p>}
         {activeSession && !showLogger && <div className="resume-banner"><span><strong>Workout in progress</strong><small>{sessionSets.length} {sessionSets.length === 1 ? "set" : "sets"} logged · saved on this device</small></span><button className="secondary-button" onClick={() => setShowLogger(true)}>Resume workout →</button></div>}
         {view === "today" && <TodayDashboard plan={previewPlan} reasons={recommendedPreview.reasons} sessionNote={recommendedPreview.sessionNote} workouts={workoutsInCurrentUnit} preferences={preferences} gyms={gyms} context={gymContext} inProgress={Boolean(activeSession)} loggedSets={sessionSets.length} workload={classifyFatigue(workouts)} onContextChange={updateTodaysContext} onSaveGym={updateGym} exerciseChoiceMessage={previewChanges.message} hasExerciseChoices={skippedIds.length > 0} onResetExerciseChoices={() => setExerciseChoices(undefined)} onSkipExercise={(id) => setExerciseChoices((current) => ({ base: basePreview, skippedIds: [...(current?.base === basePreview ? current.skippedIds : []), id] }))} onStart={startRecommendedWorkout} onPlans={() => setView("plans")} onHistory={() => setView("history")}>
-            {activePlan.planningAuthority !== "recommended" && activePlanExerciseIds.length > 0 && <details className="saved-plan-suggestions mini-panel"><summary>Suggestions for {activePlan.name}</summary><p className="brief-note">Equipment and time adjustments apply to today's session. Other accepted changes update your saved plan. Start it from the Plans tab.</p>{planRecommendations.filter((item) => item.type !== "KEEP").map((item) => <RecommendationRow key={item.id} recommendation={item} unit={preferences.weightUnit} decision={latestRecommendationDecision(item.id, recommendationDecisions)} onDecision={handleRecommendationDecision} />)}{planRecommendations.every((item) => item.type === "KEEP") && <p className="brief-note">No changes suggested. Keep following your plan.</p>}</details>}
+            {activePlan.planningAuthority !== "recommended" && activePlanExerciseIds.length > 0 && <details className="saved-plan-suggestions mini-panel"><summary>Suggestions for {activePlan.name}</summary><p className="brief-note">Equipment and time adjustments apply to today's session. Other accepted changes update your saved plan. Start it from the Plans tab.</p>{planRecommendations.filter((item) => item.type !== "KEEP").map((item) => <RecommendationRow key={item.id} recommendation={item} unit={preferences.weightUnit} decision={decisionForRecommendation(item, recommendationDecisions, activePlan.id, preferences.weightUnit)?.decision} onDecision={handleRecommendationDecision} />)}{planRecommendations.every((item) => item.type === "KEEP") && <p className="brief-note">No changes suggested. Keep following your plan.</p>}</details>}
         </TodayDashboard>}        {view === "history" && (<HistoryView key={completedWorkoutId ?? "history"} initialWorkoutId={completedWorkoutId} workouts={workouts} unit={preferences.weightUnit} onUpdate={(workout) => setWorkouts(updateWorkout(workout, workouts))} onDelete={(workoutId) => setWorkouts(deleteWorkout(workoutId, workouts))}/>)}        {view === "exercises" && <ExercisesView />}        {view === "plans" && (<PlansView preferences={preferences} trainingState={trainingState} plans={plans} onSave={(plan) => setPlans(savePlan(plan))} onStart={startPlan} onDelete={(planId) => setPlans(deletePlan(planId))}/>)}        {view === "goals" && (<GoalsView preferences={preferences} onSave={(next) => {
                 setPreferences(savePreferences(next));
                 setView("today");

@@ -1,4 +1,6 @@
 import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
+import { analyzeWorkoutSession } from './workout-analysis'
+import { compareWorkoutChronology } from './workout-session'
 import { sameMuscle } from './muscle-priorities'
 import { displayWeight } from './units'
 import type { Exercise, ExerciseFeatures, MuscleFeatures, MuscleTrainingState, TrainingState, WeightUnit, Workout } from './models'
@@ -9,15 +11,18 @@ import type { Exercise, ExerciseFeatures, MuscleFeatures, MuscleTrainingState, T
  * cannot establish muscle exposure. All external loads share one explicit unit.
  */
 export function deriveTrainingState(exercises: Exercise[], history: Workout[], asOf: string, unit: WeightUnit = 'lb', additionalMuscles: string[] = []): TrainingState {
-  const completed = history.filter((workout) => (workout.status === undefined || workout.status === 'completed')
+  const eligible = history.filter((workout) => (workout.status === undefined || workout.status === 'completed')
     && /^\d{4}-\d{2}-\d{2}$/.test(workout.date) && Number.isFinite(Date.parse(workout.date))
     && new Date(workout.date).toISOString().slice(0, 10) === workout.date && workout.date <= asOf)
-    .map((workout) => ({ ...workout, unit, sets: workout.sets.filter((set) => Number.isFinite(set.reps) && set.reps > 0 && Number.isFinite(set.weight) && set.weight >= 0)
-      .map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, unit) })) }))
+    .map((workout) => ({ ...workout, sets: workout.sets.filter((set) => Number.isFinite(set.reps) && set.reps > 0 && Number.isFinite(set.weight) && set.weight >= 0) }))
+  const completed = eligible.map((workout) => ({ ...workout, unit, sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, unit) })) }))
+  const knownIds = new Set(exercises.map((exercise) => exercise.id))
   const muscles = [...exercises.flatMap((exercise) => exercise.primaryMuscles), ...additionalMuscles]
     .filter((muscle, index, all) => all.findIndex((other) => sameMuscle(muscle, other)) === index)
   return {
     asOf, unit,
+    outcomes: eligible.filter((workout) => workout.prescriptionChanges?.length || workout.sets.some((set) => set.setType === 'working' && knownIds.has(set.exerciseId)))
+      .sort(compareWorkoutChronology).map((workout) => analyzeWorkoutSession(workout, eligible, exercises)!),
     exercises: exercises.map((exercise) => calculateExerciseFeatures(exercise, completed, asOf)),
     muscles: muscles.map((muscle) => {
       const features = calculateMuscleFeatures(muscle, exercises, completed, asOf)

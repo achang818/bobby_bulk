@@ -1,13 +1,14 @@
-import type { Recommendation, WorkoutTemplate } from './models'
+import type { Exercise, Recommendation, WorkoutTemplate } from './models'
 import { createPlannedExercise, normalizeWorkoutTemplate, planExerciseIds, synchronizePlan } from './workout-session'
 
-export function applyAcceptedRecommendation(plan: WorkoutTemplate, recommendation: Recommendation): WorkoutTemplate {
+export function applyAcceptedRecommendation(plan: WorkoutTemplate, recommendation: Recommendation, exercises: Exercise[] = []): WorkoutTemplate {
   const normalizedPlan = normalizeWorkoutTemplate(plan)
   switch (recommendation.type) {
     case 'REPLACE':
       if (recommendation.change.kind !== 'replace') return normalizedPlan
       { const change = recommendation.change
-        return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === change.fromExerciseId ? { ...exercise, exerciseId: change.toExerciseId } : exercise) }) }
+        const replacement = exercises.find((exercise) => exercise.id === change.toExerciseId)
+        return synchronizePlan({ ...normalizedPlan, plannedExercises: normalizedPlan.plannedExercises!.map((exercise) => exercise.exerciseId === change.fromExerciseId ? { ...exercise, exerciseId: change.toExerciseId, repRange: { ...(replacement?.repRange ?? exercise.repRange) }, loadRecommendation: undefined } : exercise) }) }
     case 'ADD':
       if (recommendation.change.kind !== 'add') return normalizedPlan
       { const change = recommendation.change
