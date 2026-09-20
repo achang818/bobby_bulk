@@ -16,7 +16,7 @@ export function setsWithinWindow(history: Workout[], asOf: string, days: number,
 /** A durable account of one exercise inside one completed session. */
 export function calculateExercisePerformance(workout: Workout, exerciseId: string): ExercisePerformance | undefined {
   if (workout.status === 'in-progress') return undefined
-  const actualSets = workout.sets.filter((set) => set.exerciseId === exerciseId)
+  const actualSets = workout.sets.filter((set) => set.exerciseId === exerciseId && Number.isFinite(set.reps) && set.reps > 0 && Number.isFinite(set.weight) && set.weight >= 0)
   if (!actualSets.length) return undefined
   // Do not use current defaults here: only the session's planned snapshot is historical prescription evidence.
   const planned = workout.plannedExercises?.find((item) => item.exerciseId === exerciseId)
@@ -25,7 +25,7 @@ export function calculateExercisePerformance(workout: Workout, exerciseId: strin
   const inRange = planned ? working.filter((set) => set.reps >= planned.repRange.min && set.reps <= planned.repRange.max) : []
   const completion = completionFor(planned?.sets, working.length, inRange.length)
   const e1rm = working.flatMap((set) => set.estimatedOneRepMax === undefined ? [] : [set.estimatedOneRepMax])
-  const bestWorkingSet = [...working].sort((a, b) => (b.estimatedOneRepMax ?? 0) - (a.estimatedOneRepMax ?? 0) || b.reps - a.reps || b.weight - a.weight)[0]
+  const bestWorkingSet = [...working].sort((a, b) => (b.estimatedOneRepMax ?? 0) - (a.estimatedOneRepMax ?? 0) || b.reps - a.reps || b.weight - a.weight || (b.rir ?? -1) - (a.rir ?? -1) || a.id.localeCompare(b.id))[0]
   return {
     exerciseId, sessionId: workout.id, date: workout.date,
     ...(planned ? { plannedSets: planned.sets, plannedRepRange: { ...planned.repRange }, plannedSetType: planned.setType } : {}),
@@ -50,7 +50,7 @@ export function exercisePerformanceHistory(exerciseId: string, history: Workout[
   })
 }
 
-export function calculateExerciseFeatures(exercise: Exercise, history: Workout[], asOf = latestDate(history)): ExerciseFeatures {
+export function calculateExerciseFeatures(exercise: Exercise, history: Workout[], asOf: string): ExerciseFeatures {
   const allPerformances = exercisePerformanceHistory(exercise.id, history).filter((item) => item.date <= asOf)
   const performances = allPerformances.filter((item) => item.completedWorkingSets > 0)
   const recent = performances.slice(-5)
@@ -68,12 +68,12 @@ export function calculateExerciseFeatures(exercise: Exercise, history: Workout[]
     ...(e1rms.length ? { bestEstimatedOneRepMax: Math.max(...e1rms) } : {}),
     recentWorkingVolume: sum(recent.map((item) => item.workingVolume)),
     ...(completionRates.length ? { averageCompletionRate: average(completionRates) } : {}),
-    progressionState: classifyExerciseProgression(performances), recentWorkingSets: workingSets,
+    progressionState: performances.slice(-2).some((item) => item.workingSets.some((set) => set.loadType && set.loadType !== 'external')) ? 'insufficient history' : classifyExerciseProgression(performances), recentWorkingSets: workingSets,
     historyConfidence: confidenceFor(performances.length),
   }
 }
 
-export function calculateMuscleFeatures(muscle: string, exercises: Exercise[], history: Workout[], asOf = latestDate(history)): MuscleFeatures {
+export function calculateMuscleFeatures(muscle: string, exercises: Exercise[], history: Workout[], asOf: string): MuscleFeatures {
   const normalized = muscle.trim().toLowerCase()
   const ids = new Set(exercises.filter((exercise) => exercise.primaryMuscles.some((item) => item.trim().toLowerCase() === normalized)).map((exercise) => exercise.id))
   const matching = (days: number) => sessionsWithinWindow(history, asOf, days).filter((workout) => workout.sets.some((set) => set.setType === 'working' && ids.has(set.exerciseId)))
@@ -101,7 +101,7 @@ export function comparePlannedVsActual(workout: Workout): PlannedVsActualExercis
   })
 }
 
-export function calculatePlanFeatures(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], asOf?: string) {
+export function calculatePlanFeatures(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], asOf: string) {
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const ids = planExerciseIds(plan)
   const planExercises = plannedExercises.flatMap((planned) => { const exercise = exercises.find((item) => item.id === planned.exerciseId); return exercise ? [{ exercise, planned }] : [] })
@@ -122,7 +122,7 @@ function toPerformedSet(set: Workout['sets'][number]) {
 function countPreviousWeek(history: Workout[], asOf: string, ids: Set<string>): number { return history.filter((workout) => workout.status !== 'in-progress' && daysBetween(workout.date, asOf) > 7 && daysBetween(workout.date, asOf) <= 14).flatMap((workout) => workout.sets).filter((set) => set.setType === 'working' && ids.has(set.exerciseId)).length }
 function workloadTrend(current: number, previous: number): WorkloadTrend { if (current === 0 && previous === 0) return 'insufficient history'; if (current > previous) return 'increasing'; if (current < previous) return 'decreasing'; return 'stable' }
 function confidenceFor(sessions: number): HistoryConfidence { return sessions === 0 ? 'none' : sessions === 1 ? 'limited' : sessions < 4 ? 'moderate' : 'strong' }
-function latestDate(history: Workout[]) { return history.filter((workout) => workout.status !== 'in-progress').map((workout) => workout.date).sort().at(-1) ?? new Date().toISOString().slice(0, 10) }
+
 function daysBetween(start: string, end: string) { return Math.floor((Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / DAY) }
 function average(values: number[]) { return values.length ? sum(values) / values.length : 0 }
 function sum(values: number[]) { return values.reduce((total, value) => total + value, 0) }

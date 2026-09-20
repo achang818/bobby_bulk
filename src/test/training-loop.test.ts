@@ -110,7 +110,11 @@ describe('closed-loop recommended workouts', () => {
       { ...older, id: 'unknown', sets: working('removed-catalog-id') },
     ]
     const state = deriveTrainingState(catalog, [older, newer], '2026-09-16')
-    expect(deriveTrainingState(catalog, [newer, ...ignored, older], '2026-09-16')).toEqual(state)
+    const withIgnored = deriveTrainingState(catalog, [newer, ...ignored, older], '2026-09-16')
+    expect(withIgnored.exercises).toEqual(state.exercises)
+    expect(withIgnored.muscles).toEqual(state.muscles)
+    // A saved prescription remains reviewable even when its sets cannot establish training evidence.
+    expect(withIgnored.outcomes.find((item) => item.sessionId === 'invalid-set')?.workingSets).toBe(0)
     expect(exerciseTrainingState(state, catalog[0].id).mostRecentPerformance?.heaviestWorkingWeight).toBeCloseTo(22, 0)
     expect(generate([newer, older])).toEqual(generate([older, ...ignored, newer]))
     expect(muscleTrainingState(state, 'Biceps')).toMatchObject({ rolling7DaySets: 2, frequency7Days: 2, rolling14DaySets: 2, rolling28DaySets: 2 })

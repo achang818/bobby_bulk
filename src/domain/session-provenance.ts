@@ -1,3 +1,4 @@
+import { convertWeight } from './units'
 import type { PlannedExercise, Recommendation, RecommendationDecision, SessionPrescriptionChange, WeightUnit } from './models'
 
 export function affectedExerciseIds(recommendation: Recommendation): string[] {
@@ -38,7 +39,13 @@ export function latestPlanDecisions(decisions: RecommendationDecision[], planId:
 export function decisionForRecommendation(recommendation: Recommendation, decisions: RecommendationDecision[], planId: string, unit: WeightUnit): RecommendationDecision | undefined {
   const decision = latestPlanDecisions(decisions, planId).find((item) => item.recommendationId === recommendation.id)
   if (!decision?.recommendation || decision.recommendation.type !== recommendation.type) return undefined
-  if (recommendation.type === 'PROGRESSION' && decision.unit && decision.unit !== unit) return undefined
+  const prior = decision.recommendation.change
+  const proposed = recommendation.change
+  if (prior.kind === 'progression' && proposed.kind === 'progression' && prior.recommendedLoad !== undefined && proposed.recommendedLoad !== undefined) {
+    return Math.abs(convertWeight(prior.recommendedLoad, decision.unit ?? 'lb', 'lb') - convertWeight(proposed.recommendedLoad, unit, 'lb')) <= .25
+      && prior.repRange.min === proposed.repRange.min && prior.repRange.max === proposed.repRange.max
+      && JSON.stringify(decision.recommendation.target) === JSON.stringify(recommendation.target) ? decision : undefined
+  }
   return JSON.stringify(decision.recommendation.change) === JSON.stringify(recommendation.change)
     && JSON.stringify(decision.recommendation.target) === JSON.stringify(recommendation.target) ? decision : undefined
 }

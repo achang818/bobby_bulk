@@ -1,8 +1,61 @@
-export type ExerciseType = 'compound' | 'isolation'
+export type ExerciseType =
+  | 'compound'
+  | 'isolation'
+
 /** Broad structural movement category, used to preserve exercise intent. */
-export type MovementPattern = 'horizontal-pull' | 'vertical-pull' | 'horizontal-push' | 'vertical-push' | 'knee-dominant' | 'hip-hinge' | 'carry' | 'trunk-flexion' | 'isolation' | 'other'
+export type MovementPattern =
+  | 'horizontal-pull'
+  | 'vertical-pull'
+  | 'horizontal-push'
+  | 'vertical-push'
+  | 'knee-dominant'
+  | 'hip-hinge'
+  | 'carry'
+  | 'trunk-flexion'
+  | 'trunk-extension'
+  | 'trunk-rotation'
+  | 'trunk-stability'
+  | 'isolation'
+  | 'other'
+
 /** Specific primary anatomical or joint action; this is not a movement-pattern label. */
-export type JointAction = 'elbow-flexion' | 'elbow-extension' | 'shoulder-flexion' | 'shoulder-extension' | 'shoulder-abduction' | 'shoulder-adduction' | 'shoulder-horizontal-adduction' | 'shoulder-horizontal-abduction' | 'hip-flexion' | 'hip-extension' | 'hip-abduction' | 'hip-adduction' | 'knee-flexion' | 'knee-extension' | 'ankle-plantarflexion' | 'ankle-dorsiflexion' | 'spinal-flexion' | 'trunk-extension' | 'trunk-rotation' | 'trunk-stability' | 'scapular-retraction' | 'scapular-elevation'
+export type JointAction =
+  | 'elbow-flexion'
+  | 'elbow-extension'
+
+  | 'shoulder-flexion'
+  | 'shoulder-extension'
+  | 'shoulder-abduction'
+  | 'shoulder-adduction'
+  | 'shoulder-horizontal-adduction'
+  | 'shoulder-horizontal-abduction'
+
+  | 'scapular-retraction'
+  | 'scapular-protraction'
+  | 'scapular-elevation'
+  | 'scapular-depression'
+
+  | 'hip-flexion'
+  | 'hip-extension'
+  | 'hip-abduction'
+  | 'hip-adduction'
+
+  | 'knee-flexion'
+  | 'knee-extension'
+
+  | 'ankle-plantarflexion'
+  | 'ankle-dorsiflexion'
+
+  | 'spinal-flexion'
+  | 'spinal-extension'
+  | 'trunk-rotation'
+  | 'trunk-stability'
+
+  | 'forearm-pronation'
+  | 'forearm-supination'
+
+  | 'wrist-flexion'
+  | 'wrist-extension'
 
 export interface Exercise {
   id: string
@@ -332,6 +385,7 @@ export interface MuscleTrainingState extends MuscleFeatures {
 }
 
 export interface TrainingState {
+  workload: import('./states').RecentWorkloadLevel
   asOf: string
   unit: WeightUnit
   exercises: ExerciseFeatures[]
@@ -413,6 +467,8 @@ export interface RecommendationDecision {
   decision: RecommendationDecisionType
   /** Present on newly recorded decisions; omitted only by legacy local data. */
   timestamp?: string
+  /** Calendar date at the coaching boundary; independent of the UTC event timestamp. */
+  coachingDate?: string
   /** New decisions retain the exact proposal and prescription they refer to. */
   recommendation?: Recommendation
   planId?: string

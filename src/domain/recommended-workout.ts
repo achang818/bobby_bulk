@@ -1,3 +1,4 @@
+import { currentCoachingDate } from './coaching-date'
 import { deriveCoachingPreferences, behavioralBias, calibrateProgressionLoad, type CoachingPreferenceState } from './coaching-preferences'
 import { MINUTES_PER_EXERCISE_TRANSITION, MINUTES_PER_WORKING_SET } from './adaptation'
 import { isExerciseAvailable } from './equipment'
@@ -61,7 +62,7 @@ export function generateRecommendedWorkout(input: RecommendedWorkoutInput): Reco
 type TrainingInput = Omit<RecommendedWorkoutInput, 'history' | 'asOf' | 'trainingState'> & { trainingState: TrainingState; coachingPreferences: CoachingPreferenceState }
 
 function resolveTrainingInput(input: RecommendedWorkoutInput): TrainingInput {
-  const { history, asOf = input.trainingState?.asOf ?? new Date().toISOString().slice(0, 10), trainingState, ...context } = input
+  const { history, asOf = input.trainingState?.asOf ?? currentCoachingDate(), trainingState, ...context } = input
   const resolved = resolveTrainingState(input.exercises, history, asOf, input.preferences.weightUnit, resolveMusclePriorities(input.preferences).orderedMuscles, trainingState)
   return { ...context, trainingState: resolved, coachingPreferences: deriveCoachingPreferences(resolved, input.decisions) }
 }
@@ -85,7 +86,8 @@ function generateFromTrainingState(input: TrainingInput): RecommendedWorkout {
       ? `A shorter workout to fit your ${input.todaysContext.availableMinutes}-minute limit.`
       : `Only ${plannedExercises.length} suitable ${plannedExercises.length === 1 ? 'movement fits' : 'movements fit'} your recent training, equipment, goals, and exercise choices. Extra overlapping work has not been added just to fill the session.`
     : undefined
-  const reasons = uniqueReasons([...selectionReasons(targets, finalSelection, input), ...finalSelection.flatMap(({ exercise }) => { const evidence = input.coachingPreferences.exercises.find((item) => item.exerciseId === exercise.id); return evidence && evidence.state !== 'neutral' ? [`${exercise.name}: ${evidence.state.replaceAll('-', ' ')}. ${evidence.reasons.join(' ')}`] : [] }), ...(sessionNote ? [sessionNote] : [])])
+  const recoveryReasons = resolveMusclePriorities(input.preferences).orderedMuscles.filter((muscle) => !isMuscleOpportunity(muscleTrainingState(input.trainingState, muscle))).map((muscle) => `${muscle} isn't prioritized today because you trained it recently.`)
+  const reasons = uniqueReasons([...recoveryReasons, ...selectionReasons(targets, finalSelection, input), ...finalSelection.flatMap(({ exercise }) => { const evidence = input.coachingPreferences.exercises.find((item) => item.exerciseId === exercise.id); return evidence && evidence.state !== 'neutral' ? [`${exercise.name}: ${evidence.reasons.join(' ')}`] : [] }), ...(sessionNote ? [sessionNote] : [])])
   const workout: WorkoutTemplate = {
     id: 'recommended-workout',
     name: 'Recommended workout',
@@ -178,13 +180,9 @@ function chooseMuscleTargets(input: TrainingInput): MuscleTarget[] {
 }
 
 function allocationReason(muscle: string, source: string, desiredFrequency: number, features: MuscleFeatures) {
-  const opportunities = `${features.frequency7Days}/${desiredFrequency || 0} direct opportunities in the recent week`
-  const article = source === 'explicit priority' ? 'an' : 'a'
-  if (desiredFrequency > 0 && features.frequency7Days >= desiredFrequency) return `${muscle} has met its recent frequency guidance (${opportunities}); it remains suitable for supporting the session, with less emphasis.`
-  if (features.historyConfidence === 'none') return `${muscle} is ${article} ${source}; there is no direct working-set history yet, so Bobby is using the priority and exercise metadata conservatively.`
-  if (features.historyConfidence === 'limited') return `${muscle} is ${article} ${source} with ${opportunities}; the direct history is limited, so Bobby is not over-reading a single session.`
-  if (features.volumeState === 'low recent volume') return `${muscle} is ${article} ${source} with low recent direct working-set exposure (${opportunities}).`
-  return `${muscle} is ${article} ${source} with ${opportunities}.`
+  if (desiredFrequency > 0 && features.frequency7Days >= desiredFrequency) return `${muscle} has already had ${features.frequency7Days} sessions this week, so it gets less emphasis today.`
+  if (features.historyConfidence === 'none') return `${muscle} supports your ${source === 'explicit priority' ? 'stated priorities' : 'goals'}. There is no completed training history for it yet.`
+  return `${muscle} supports your ${source === 'explicit priority' ? 'stated priorities' : 'goals'} and has ${features.rolling7DaySets} working sets logged this week.${features.historyConfidence === 'limited' ? ' Your direct history is limited, so this is a starting point.' : ''}`
 }
 
 /**

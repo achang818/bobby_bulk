@@ -72,7 +72,7 @@ describe('Recommended Workout generation', () => {
     })
     expect(recommendation.workout.exerciseIds).toEqual([lats.id])
     expect(recommendation.workout.plannedExercises![0].sets).toBeLessThanOrEqual(lats.defaultSets)
-    expect(recommendation.reasons.some((reason) => reason.includes('met its recent frequency guidance'))).toBe(true)
+    expect(recommendation.reasons.some((reason) => reason.includes('less emphasis today'))).toBe(true)
   })
 
   it('does not pad limited choices with redundant variations or blame a generous time limit', () => {

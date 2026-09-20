@@ -7,6 +7,7 @@ import { evaluateWorkout } from "../domain/workout-evaluator";
 import type { Gym, TodaysContext, UserPreferences, Workout, WorkoutTemplate } from "../domain/models";
 
 type Props = {
+    asOf: string;
     plan: WorkoutTemplate;
     reasons: string[];
     sessionNote?: string;
@@ -29,7 +30,7 @@ type Props = {
     children?: ReactNode;
 };
 
-export function TodayDashboard({ plan, reasons, sessionNote, workouts, preferences, gyms, context, inProgress, loggedSets, workload, onContextChange, onSaveGym, exerciseChoiceMessage, hasExerciseChoices, onSkipExercise, onResetExerciseChoices, onStart, onPlans, onHistory, children }: Props) {
+export function TodayDashboard({ asOf, plan, reasons, sessionNote, workouts, preferences, gyms, context, inProgress, loggedSets, workload, onContextChange, onSaveGym, exerciseChoiceMessage, hasExerciseChoices, onSkipExercise, onResetExerciseChoices, onStart, onPlans, onHistory, children }: Props) {
     const planned = plan.plannedExercises ?? [];
     const totalSets = planned.reduce((total, exercise) => total + exercise.sets, 0);
     const lastWorkout = [...workouts].sort((a, b) => b.date.localeCompare(a.date))[0];
@@ -39,7 +40,7 @@ export function TodayDashboard({ plan, reasons, sessionNote, workouts, preferenc
     const startLabel = inProgress ? "Resume workout" : "Start workout";
     return <>
         <section className="page-intro">
-            <div><p className="eyebrow">{new Date().toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
+            <div><p className="eyebrow">{new Date(`${asOf}T12:00:00`).toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })}</p>
                 <h1>A little stronger, today.</h1><p className="lede">Your next session, with the details taken care of.</p></div>
             <span className="workspace-label"><span className="status-dot" /> Your training space</span>
         </section>
@@ -80,7 +81,7 @@ export function TodayDashboard({ plan, reasons, sessionNote, workouts, preferenc
                     <details className="equipment-disclosure"><summary>Unavailable equipment{context.unavailableEquipment.length > 0 ? ` (${context.unavailableEquipment.length})` : ""}</summary><fieldset className="equipment-options"><legend className="sr-only">Equipment unavailable today</legend>{[...(gym?.equipment.filter((tag) => tag !== 'bodyweight') ?? []), 'bodyweight' as const].map((equipment) => <label key={equipment}><input type="checkbox" checked={context.unavailableEquipment.includes(equipment)} onChange={() => onContextChange({ ...context, unavailableEquipment: context.unavailableEquipment.includes(equipment) ? context.unavailableEquipment.filter((item) => item !== equipment) : [...context.unavailableEquipment, equipment] })} />{equipmentLabels[equipment]}</label>)}</fieldset></details>
                     <GymProfiles gyms={gyms} selectedId={context.gymId} onSave={onSaveGym} />
                 </section>
-                <section className="mini-panel workload-panel"><div className="panel-title">Recent workload<span className={`workload-pill fatigue-${workload.toLowerCase()}`}>{workload}</span></div><p className="brief-note">Based on your logged training.</p>
+                <section className="mini-panel workload-panel"><div className="panel-title">Recent workload<span className={`workload-pill workload-${workload.toLowerCase()}`}>{workload}</span></div><p className="brief-note">Completed working sets over the past seven days.</p>
                     <details className="session-explanation"><summary>Workout balance</summary>{warnings.length ? warnings.map((finding) => <div className="workout-health-finding" key={finding.title}><strong>{finding.title}</strong><span>{finding.description}</span></div>) : <p className="brief-note">No structural concerns identified.</p>}</details>
                 </section>
                 <section className="mini-panel last-session"><div className="panel-title"><span>Last session</span>{lastWorkout && <span>{new Date(`${lastWorkout.date}T12:00:00`).toLocaleDateString("en-US", { month: "short", day: "numeric" })}</span>}</div><strong>{lastWorkout?.title ?? "A fresh start"}</strong><p>{lastWorkout ? `${lastWorkout.sets.length} sets · ${new Set(lastWorkout.sets.map((set) => set.exerciseId)).size} exercises` : "Your first workout starts here."}</p><button className="text-button" onClick={onHistory}>View training history <span aria-hidden="true">→</span></button></section>

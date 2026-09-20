@@ -139,7 +139,20 @@ export const exercises: Exercise[] = [
     movementPattern: 'horizontal-push',
     primaryAction: 'shoulder-horizontal-adduction',
   },
-
+  {
+    id: 'reverse-pec-deck',
+    name: 'Reverse Pec Deck',
+    category: 'Shoulder',
+    equipment: 'Machine',
+    primaryMuscles: ['Rear delts'],
+    secondaryMuscles: ['Mid back'],
+    goals: ['Build muscle'],
+    type: 'isolation',
+    repRange: { min: 10, max: 15 },
+    defaultSets: 3,
+    movementPattern: 'isolation',
+    primaryAction: 'shoulder-horizontal-abduction',
+  },
   {
     id: 'dumbbell-fly',
     name: 'Dumbbell Fly',
@@ -154,7 +167,6 @@ export const exercises: Exercise[] = [
     movementPattern: 'horizontal-push',
     primaryAction: 'shoulder-horizontal-adduction',
   },
-
   {
     id: 'push-up',
     name: 'Push-up',
@@ -1061,6 +1073,24 @@ export const exercises: Exercise[] = [
   primaryAction: 'hip-abduction',
 },
 {
+  id: 'back-extension-machine',
+  name: 'Back Extension Machine',
+  category: 'Back',
+  equipment: 'Machine',
+
+  primaryMuscles: ['Lower back'],
+  secondaryMuscles: ['Glutes'],
+
+  goals: ['Build muscle', 'Improve athletic performance'],
+  type: 'isolation',
+
+  repRange: { min: 8, max: 15 },
+  defaultSets: 3,
+
+  movementPattern: 'trunk-extension',
+  primaryAction: 'spinal-extension',
+},
+{
   id: 'machine-triceps-press',
   name: 'Seated Triceps Press Machine',
   category: 'Arms',
@@ -1076,16 +1106,16 @@ export const exercises: Exercise[] = [
 },
 {
   id: 'assisted-dips',
-  name: 'Assisted Triceps Dip',
-  category: 'Arms',
-  equipment: 'Dip bars',
-  primaryMuscles: ['Triceps'],
-  secondaryMuscles: ['Chest', 'Front delts'],
-  goals: ['Build muscle', 'Get stronger'],
+  name: 'Assisted Dip',
+  category: 'Press',
+  equipment: 'Machine',
+  primaryMuscles: ['Chest', 'Triceps'],
+  secondaryMuscles: ['Front delts'],
+  goals: ['Build muscle', 'Get stronger', 'General fitness'],
   type: 'compound',
-  repRange: { min: 5, max: 12 },
+  repRange: { min: 6, max: 12 },
   defaultSets: 3,
   movementPattern: 'vertical-push',
   primaryAction: 'elbow-extension',
-},
+}
 ]

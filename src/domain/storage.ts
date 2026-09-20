@@ -1,3 +1,4 @@
+import { currentCoachingDate } from './coaching-date'
 import { exercises } from './exercises'
 import { normalizeWorkoutSession, normalizeWorkoutTemplate } from './workout-session'
 import type { Gym, Program, Recommendation, RecommendationDecision, RecommendationDecisionType, Split, TodaysContext, UserPreferences, Workout, WorkoutSession, WorkoutTemplate } from './models'
@@ -197,9 +198,10 @@ export function saveTodaysContext(context: TodaysContext): TodaysContext {
   return context
 }
 
-export function saveRecommendationDecision(recommendation: Recommendation, decision: RecommendationDecisionType, context: Pick<RecommendationDecision, 'planId' | 'unit' | 'prescriptionBefore' | 'prescriptionAfter'> = {}): RecommendationDecision[] {
+export function saveRecommendationDecision(recommendation: Recommendation, decision: RecommendationDecisionType, context: Pick<RecommendationDecision, 'planId' | 'unit' | 'prescriptionBefore' | 'prescriptionAfter' | 'coachingDate'> = {}): RecommendationDecision[] {
   const decisions = [...loadRecommendationDecisions(), {
     id: crypto.randomUUID(),
+    coachingDate: currentCoachingDate(),
     ...structuredClone(context),
     recommendation: structuredClone(recommendation),
     recommendationId: recommendation.id,
@@ -213,8 +215,11 @@ export function saveRecommendationDecision(recommendation: Recommendation, decis
 }
 
 export function loadRecommendationDecisions(): RecommendationDecision[] {
-  const parsed = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '[]') as unknown
-  return Array.isArray(parsed) ? parsed as RecommendationDecision[] : []
+  try {
+    const parsed: unknown = JSON.parse(localStorage.getItem(DECISIONS_KEY) ?? '[]')
+    return Array.isArray(parsed) ? parsed.filter((item): item is RecommendationDecision => item && typeof item.id === 'string' && typeof item.recommendationId === 'string' && typeof item.exerciseId === 'string'
+      && ['accepted', 'rejected', 'dismissed'].includes(item.decision) && typeof item.recommendationType === 'string') : []
+  } catch { return [] }
 }
 
 export function latestRecommendationDecision(recommendationId: string, decisions: RecommendationDecision[]): RecommendationDecisionType | undefined {

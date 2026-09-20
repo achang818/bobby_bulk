@@ -76,7 +76,7 @@ describe('post-workout analysis', () => {
     const current = session('three', '2026-09-13', [8, 8, 8])
     const result = analyze(current, history)
     expect(result.exercises[0]).toMatchObject({ signal: 'watch', progressionState: 'regressing' })
-    expect(calculateExerciseFeatures(exercise, [...history, current]).progressionState).toBe(result.exercises[0].progressionState)
+    expect(calculateExerciseFeatures(exercise, [...history, current], current.date).progressionState).toBe(result.exercises[0].progressionState)
     expect(result.exercises[0].message).toContain('Two consecutive')
   })
 
@@ -95,7 +95,7 @@ describe('post-workout analysis', () => {
     const result = analyze(current, history)
     expect(result.completion).toBe('partial')
     expect(result.exercises[0]).toMatchObject({ signal: 'steady', comparison: { direction: 'unchanged' } })
-    expect(calculateExerciseFeatures(exercise, [...history, current]).progressionState).not.toBe('regressing')
+    expect(calculateExerciseFeatures(exercise, [...history, current], current.date).progressionState).not.toBe('regressing')
   })
 
   it('compares equivalent mixed-unit sessions consistently', () => {
@@ -128,7 +128,7 @@ describe('post-workout analysis', () => {
     const unknown = session('unknown', '2026-09-13', [20, 20, 20], { completedAt: undefined })
     const unfinished = session('unfinished', '2026-09-12', [20, 20, 20], { status: 'in-progress' })
     expect(analyze(current, [future, evening, current, unknown, morning, unfinished]).exercises[0]).toMatchObject({ signal: 'progress', previousSessionId: morning.id })
-    expect(calculateExerciseFeatures(exercise, [current, morning]).mostRecentPerformance?.sessionId).toBe(current.id)
+    expect(calculateExerciseFeatures(exercise, [current, morning], current.date).mostRecentPerformance?.sessionId).toBe(current.id)
   })
 
   it('recomputes from corrected history without mutating or persisting an assessment', () => {

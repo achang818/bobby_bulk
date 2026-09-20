@@ -1,3 +1,4 @@
+import { currentCoachingDate } from './coaching-date'
 import { deriveCoachingPreferences, recentlyDeclined, recommendationFeedbackContext, progressionPathway } from './coaching-preferences'
 import { adaptWorkout, adaptWorkoutForTime, MINUTES_PER_WORKING_SET, MINUTES_PER_EXERCISE_TRANSITION } from './adaptation'
 import { resolveMusclePriorities } from './muscle-priorities'
@@ -50,7 +51,7 @@ export interface RecommendationConflictContext {
 /** Same pipeline as generateRecommendations, with inspectable state and decisions. */
 export function generateRecommendationsWithTrace(input: RecommendationInput) {
   const { plan, exercises, history, preferences, todaysContext, availableLoads, decisions = [] } = input
-  const asOf = input.asOf ?? input.trainingState?.asOf ?? new Date().toISOString().slice(0, 10)
+  const asOf = input.asOf ?? input.trainingState?.asOf ?? currentCoachingDate()
   const priorityProfile = resolveMusclePriorities(preferences)
   const trainingState = resolveTrainingState(exercises, history, asOf, preferences.weightUnit, priorityProfile.orderedMuscles, input.trainingState)
   const coachingPreferences = deriveCoachingPreferences(trainingState, decisions)

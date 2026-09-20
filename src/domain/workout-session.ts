@@ -1,3 +1,4 @@
+import { currentCoachingDate } from './coaching-date'
 import type { Exercise, Gym, LoggedSet, Recommendation, RecommendationDecision, PlannedExercise, SetType, TodaysContext, WeightUnit, WorkoutSession, WorkoutTemplate } from './models'
 import { contextForGym } from './gyms'
 import { affectedExerciseIds, captureRecommendationChange, decisionForRecommendation, latestPlanDecisions, samePrescription } from './session-provenance'
@@ -87,7 +88,7 @@ export function createWorkoutSession(workout: WorkoutTemplate, plannedExercises 
   return {
     id: crypto.randomUUID(),
     workoutId: workout.id,
-    date: now.slice(0, 10),
+    date: currentCoachingDate(new Date(now)),
     title: workout.name,
     status: 'in-progress',
     startedAt: now,
@@ -165,8 +166,8 @@ export function compareWorkoutChronology(left: WorkoutSession, right: WorkoutSes
 }
 
 export function normalizeWorkoutSession(value: unknown): WorkoutSession {
-  const raw = value as Partial<WorkoutSession> & { sets?: Partial<LoggedSet>[] }
-  const date = raw.date ?? new Date().toISOString().slice(0, 10)
+  const raw = (value && typeof value === 'object' ? value : {}) as Partial<WorkoutSession> & { sets?: Partial<LoggedSet>[] }
+  const date = raw.date ?? ''
   return {
     id: raw.id ?? crypto.randomUUID(),
     workoutId: raw.workoutId ?? `legacy-${raw.id ?? 'workout'}`,
@@ -174,13 +175,13 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
     title: raw.title ?? 'Workout',
     status: raw.status ?? 'completed',
     ...(raw.startedAt ? { startedAt: raw.startedAt } : {}),
-    ...(raw.completedAt ? { completedAt: raw.completedAt } : raw.status === 'completed' || !raw.status ? { completedAt: `${date}T00:00:00.000Z` } : {}),
+    ...(raw.completedAt ? { completedAt: raw.completedAt } : {}),
     ...(raw.notes ? { notes: raw.notes } : {}),
     ...(raw.unit ? { unit: raw.unit } : {}),
     ...(raw.gym ? { gym: structuredClone(raw.gym) } : {}),
     ...(raw.context ? { context: structuredClone(raw.context) } : {}),
     ...(Array.isArray(raw.adaptationNotes) ? { adaptationNotes: raw.adaptationNotes.filter((note) => typeof note === 'string') } : {}),
-    ...(Array.isArray(raw.exerciseOmissions) ? { exerciseOmissions: raw.exerciseOmissions.filter((item) => typeof item.exerciseId === 'string' && ['voluntary', 'time', 'equipment'].includes(item.reason)).map((item) => ({ ...item })) } : {}),
+    ...(Array.isArray(raw.exerciseOmissions) ? { exerciseOmissions: raw.exerciseOmissions.filter((item) => item && typeof item.exerciseId === 'string' && ['voluntary', 'time', 'equipment'].includes(item.reason)).map((item) => ({ ...item })) } : {}),
     ...(Array.isArray(raw.prescriptionChanges) ? { prescriptionChanges: structuredClone(raw.prescriptionChanges) } : {}),
     planningAuthority: raw.planningAuthority ?? 'user-plan',
     // Incomplete historical snapshots cannot establish an original prescription.
@@ -192,7 +193,7 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
       ...createPlannedExercise(exercise.exerciseId, exercise.order ?? index), ...exercise,
       repRange: { ...(exercise.repRange ?? defaultRepRange) },
     })).filter((exercise) => exercise.exerciseId) } : {}),
-    sets: (raw.sets ?? []).map((set) => normalizeLoggedSet(set)),
+    sets: (Array.isArray(raw.sets) ? raw.sets : []).filter((set) => set && typeof set === 'object').map((set) => normalizeLoggedSet(set)),
   }
 }
 

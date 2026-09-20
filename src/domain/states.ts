@@ -1,6 +1,6 @@
 import type { ExercisePerformance, ExerciseProgressState, MuscleVolumeState, PerformedSet, PreferenceState, RecommendationDecision, Workout } from './models'
 
-export type RecentWorkloadLevel = 'Low' | 'Moderate' | 'High'
+export type RecentWorkloadLevel = 'Low' | 'Typical' | 'Elevated'
 
 export type PerformanceComparisonDirection = 'improved' | 'worse' | 'unchanged' | 'inconclusive'
 
@@ -257,16 +257,15 @@ export function classifyPreference(exerciseId: string, preferences: { preferredE
   return 'neutral'
 }
 
-export function classifyRecentWorkload(recentSessions: Workout[], asOf = latestDate(recentSessions)): RecentWorkloadLevel {
-  const recentSets = recentSessions.filter((session) => daysBetween(session.date, asOf) <= 7 && daysBetween(session.date, asOf) >= 0).reduce((total, session) => total + session.sets.length, 0)
-  const typicalWeeklySets = recentSessions.filter((session) => daysBetween(session.date, asOf) <= 28 && daysBetween(session.date, asOf) >= 0).reduce((total, session) => total + session.sets.length, 0) / 4
-  if (typicalWeeklySets === 0 || recentSets <= typicalWeeklySets * 1.15) return 'Low'
-  if (recentSets <= typicalWeeklySets * 1.5) return 'Moderate'
-  return 'High'
+/** Current descriptive workload counts valid completed ordinary sets, never fatigue. */
+export function classifyRecentWorkload(recentSessions: Workout[], asOf: string): RecentWorkloadLevel {
+  const count = (days: number) => recentSessions.filter((session) => session.status !== 'in-progress' && daysBetween(session.date, asOf) >= 0 && daysBetween(session.date, asOf) <= days)
+    .reduce((total, session) => total + session.sets.filter((set) => set.setType === 'working' && Number.isFinite(set.reps) && set.reps > 0 && Number.isFinite(set.weight) && set.weight >= 0).length, 0)
+  const recentSets = count(7)
+  const typicalWeeklySets = count(28) / 4
+  if (recentSets === 0 || typicalWeeklySets === 0 || recentSets <= typicalWeeklySets * 1.15) return 'Low'
+  if (recentSets <= typicalWeeklySets * 1.5) return 'Typical'
+  return 'Elevated'
 }
 
-/** @deprecated Use classifyRecentWorkload; this is a workload signal, not fatigue. */
-export const classifyFatigue = classifyRecentWorkload
-
-function latestDate(history: Workout[]) { return history.map((workout) => workout.date).sort().at(-1) ?? new Date().toISOString().slice(0, 10) }
-function daysBetween(start: string, end: string) { return Math.max(0, Math.floor((Date.parse(`${end}T12:00:00`) - Date.parse(`${start}T12:00:00`)) / (24 * 60 * 60 * 1000))) }
+function daysBetween(start: string, end: string) { return Math.floor((Date.parse(`${end}T12:00:00Z`) - Date.parse(`${start}T12:00:00Z`)) / 86400000) }

@@ -32,6 +32,7 @@ export interface CoachingPreferenceState {
 }
 
 const age = (date: string, asOf: string) => (Date.parse(asOf.slice(0, 10)) - Date.parse(date.slice(0, 10))) / 86400000
+const decisionDate = (decision: RecommendationDecision) => decision.coachingDate ?? decision.timestamp?.slice(0, 10)
 export const isContextRecommendation = (rec: Recommendation) => ['adapt-unavailable-equipment', 'adapt-available-time'].includes(rec.trace.ruleId)
 
 /** Rolling 90-day evidence; at most one choice per exercise/direction/day.
@@ -48,7 +49,7 @@ export function deriveCoachingPreferences(state: TrainingState, decisions: Recom
   // Last response per proposal and day, with a deterministic tie-breaker.
   const choices = new Map<string, RecommendationDecision>()
   for (const decision of [...decisions].sort((a, b) => (a.timestamp ?? '').localeCompare(b.timestamp ?? '') || a.id.localeCompare(b.id) || JSON.stringify(a).localeCompare(JSON.stringify(b)))) {
-    choices.set(`${decision.planId ?? ''}:${decision.recommendationId}:${decision.timestamp?.slice(0, 10) ?? 'legacy'}`, decision)
+    choices.set(`${decision.planId ?? ''}:${decision.recommendationId}:${decisionDate(decision) ?? 'legacy'}`, decision)
   }
   for (const decision of choices.values()) {
     const rec = decision.recommendation
@@ -62,7 +63,7 @@ export function deriveCoachingPreferences(state: TrainingState, decisions: Recom
       if (rec.type === 'KEEP') kind = 'accepted-continuity'
       if (rec.type === 'REPLACE') kind = 'accepted-optional-replacement'
     }
-    if (kind) add(decision.exerciseId, { kind, sourceId: decision.id, date: decision.timestamp?.slice(0, 10), strength: rec && decision.timestamp ? 'explicit-choice' : 'legacy' })
+    if (kind) add(decision.exerciseId, { kind, sourceId: decision.id, date: decisionDate(decision), strength: rec && decision.timestamp ? 'explicit-choice' : 'legacy' })
   }
   for (const outcome of state.outcomes) {
     for (const exercise of outcome.exercises) {
@@ -87,8 +88,10 @@ export function deriveCoachingPreferences(state: TrainingState, decisions: Recom
     const inferred = dominant >= 2 && directions.filter((value) => value === dominant).length === 1
     const behavioral: BehavioralPreference = !inferred ? 'neutral' : dominant === continuity ? 'continuity-favored' : dominant === avoidance ? 'recommend-less-evidence' : 'variation-tolerant'
     const confidence = inferred ? dominant >= 4 && directions.filter((value) => value > 0).length === 1 ? 'strong' : 'moderate' : evidence.some((fact) => fact.strength !== 'supporting') ? 'limited' : 'none'
-    const reasons = [...new Set(evidence.map((fact) => fact.kind))].map((kind) => `${evidence.filter((fact) => fact.kind === kind).length} ${kind.replaceAll('-', ' ')} record(s).`)
-    if (behavioral === 'neutral' && evidence.length) reasons.push('Insufficient or conflicting independent choices; no selection bias.')
+    const reasons = behavioral === 'continuity-favored' ? ["You've repeatedly chosen to keep this movement."]
+      : behavioral === 'recommend-less-evidence' ? ["You've repeatedly chosen to skip this movement or decline adding it, so alternatives rank a little higher."]
+        : behavioral === 'variation-tolerant' ? ["You've accepted optional alternatives to this movement more than once."] : []
+
     return { exerciseId, state: behavioral, confidence, facts: evidence, reasons }
   })
   return { asOf: state.asOf, exercises, recommendationLearning: deriveRecommendationLearning(state.outcomes, state.asOf) }
@@ -102,7 +105,7 @@ export function behavioralStateBias(state?: BehavioralPreference) { return state
 
 export function calibrateProgressionLoad(load: ExerciseLoadRecommendation, slot: PlannedExercise, coaching: CoachingPreferenceState): ExerciseLoadRecommendation {
   if (load.kind !== 'target') return load
-  const pathway = `${slot.exerciseId}:${Math.round(convertWeight(load.weight, load.unit, 'lb') * 10) / 10}:${slot.repRange.min}:${slot.repRange.max}`
+  const pathway = `${slot.exerciseId}:${Math.round(convertWeight(load.weight, load.unit, 'lb') * 2) / 2}:${slot.repRange.min}:${slot.repRange.max}`
   const evidence = coaching.recommendationLearning.find((item) => item.pathway === pathway && item.deferRepeat)
   return evidence ? { kind: 'choose-load', unit: load.unit, reason: `${evidence.reason} Choose a manageable working load today.` } : load
 }
@@ -114,7 +117,7 @@ export function compareCoachingPreference(left: string, right: string, preferenc
 
 export function progressionPathway(rec: Recommendation, unit: 'lb' | 'kg') {
   if (rec.change.kind !== 'progression' || rec.change.recommendedLoad === undefined || rec.target.kind !== 'exercise') return undefined
-  return `${rec.target.exerciseId}:${Math.round(convertWeight(rec.change.recommendedLoad, unit, 'lb') * 10) / 10}:${rec.change.repRange.min}:${rec.change.repRange.max}`
+  return `${rec.target.exerciseId}:${Math.round(convertWeight(rec.change.recommendedLoad, unit, 'lb') * 2) / 2}:${rec.change.repRange.min}:${rec.change.repRange.max}`
 }
 
 function deriveRecommendationLearning(outcomes: PostWorkoutAnalysis[], asOf: string): RecommendationLearning[] {
@@ -150,18 +153,18 @@ export function recommendationFeedbackContext(rec: Recommendation, state: Traini
   return JSON.stringify({ goals: [...preferences.goals].sort(), priorities: preferences.priorities,
     preferences: [preferences.preferredExerciseIds, preferences.recommendLessExerciseIds, preferences.excludedExerciseIds, preferences.dislikedExerciseIds].map((list) => [...list].sort()),
     equipment: [[...(context.availableEquipment ?? [])].sort(), [...(context.unavailableEquipment ?? [])].sort()], minutes: context.availableMinutes, gym: context.gymId,
-    catalog: [...catalog].sort((a, b) => a.id.localeCompare(b.id)).map((exercise) => [exercise.id, exercise.equipment, exercise.primaryMuscles, exercise.goals]),
+    catalog: [...catalog].sort((a, b) => a.id.localeCompare(b.id)).map((exercise) => [exercise.id, exercise.equipment, [...exercise.primaryMuscles].sort(), [...exercise.goals].sort()]),
     history: ids.map((id) => { const exercise = state.exercises.find((item) => item.exerciseId === id); const best = exercise?.mostRecentPerformance?.bestWorkingSet;
-      return [id, exercise?.progressionState, Math.floor((exercise?.sessionsPerformed ?? 0) / 2), best ? [best.weight, best.reps, best.rir, best.rpe] : null] }), unit: state.unit })
+      return [id, exercise?.progressionState, Math.floor((exercise?.sessionsPerformed ?? 0) / 2), best ? [Math.round(convertWeight(best.weight, state.unit, 'lb') * 2) / 2, best.reps, best.rir, best.rpe] : null] }), unit: 'lb' })
 }
 
 export function recentlyDeclined(rec: Recommendation, decisions: RecommendationDecision[], planId: string, asOf: string) {
   if (isContextRecommendation(rec) || ['KEEP', 'PROGRESSION'].includes(rec.type)) return false
-  const matches = decisions.filter((decision) => (!decision.planId || decision.planId === planId) && decision.timestamp && age(decision.timestamp, asOf) >= 0
+  const matches = decisions.filter((decision) => (!decision.planId || decision.planId === planId) && decision.timestamp && age(decisionDate(decision)!, asOf) >= 0
     && (decision.recommendation ? recommendationSignature(decision.recommendation) === recommendationSignature(rec) : decision.recommendationId === rec.id))
     .sort((a, b) => (b.timestamp ?? '').localeCompare(a.timestamp ?? '') || b.id.localeCompare(a.id))
   const latest = matches[0]
   if (!latest || latest.decision !== 'rejected') return false
   const previous = latest.recommendation?.feedbackContext
-  return age(latest.timestamp!, asOf) < (previous ? 14 : 3) && (!previous || previous === rec.feedbackContext)
+  return age(decisionDate(latest)!, asOf) < (previous ? 14 : 3) && (!previous || previous === rec.feedbackContext)
 }

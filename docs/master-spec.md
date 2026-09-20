@@ -909,39 +909,20 @@ Examples:
 
 ---
 
-## 24. Fatigue System
+## 24. Current Workload and Recovery
 
-Bobby should maintain an **under-the-hood fatigue state**.
+V1 describes recent workload as Low, Typical or Elevated. This is a count-based
+training-load description, not an estimate of physiological fatigue. It counts
+valid completed ordinary working sets in the current seven-day window against
+the 28-day weekly average. No recent sets means Low, even if the last old session
+was unusually large. Warm-ups, drop sets, failure sets and unfinished sessions do
+not establish this working-set workload signal.
 
-The user doesn't need to manually maintain a complicated recovery system.
-
-Potential inputs:
-
-* Recent training
-* Muscle-group training frequency
-* Recent volume
-* Performance changes
-* RIR/RPE
-* Time since training
-* Repeated high-effort sessions
-* Recent unusually poor performance
-
-Output:
-
-```text id="h3s0p4"
-Estimated fatigue:
-Low
-Moderate
-High
-```
-
-The home screen can show this unobtrusively.
-
-Example:
-
-> **Estimated fatigue: Moderate**
-
-The fatigue model should influence recommendations but should not pretend to know the user's exact physiological recovery state.
+TrainingState owns the current workload display and muscle-specific recovery.
+Every primary muscle receives direct exposure from a recognized ordinary working
+set. Secondary involvement never increases direct volume. Recently trained
+muscles (daysSinceTrained <= 1) are unavailable for normal Recommended Workout
+opportunities. No aggregate physiological fatigue score is introduced in v1.
 
 ---
 
@@ -1928,7 +1909,7 @@ Features
 → Training State
 ```
 
-Keep fatigue primarily under the hood.
+Use descriptive workload and explicit muscle recovery facts; do not infer physiological fatigue.
 
 ### Phase 9 — Decision engine
 
@@ -2054,3 +2035,81 @@ The most important experience constraint is:
 > **Bobby should be sophisticated under the hood but extremely low-friction on the surface.**
 
 You shouldn't have to "manage Bobby." You should be able to open it, see **what it thinks you should do and why**, train, tap a checkmark after each set, and leave.
+
+
+## V1 Hardening & End-to-End Coaching Consistency
+
+### Date and fact ownership
+
+The application composition boundary chooses one local calendar `asOf` date and
+passes it through TrainingState and recommendation generation. It refreshes this
+date on window focus and once per minute so an open app does not retain yesterday.
+Standalone generator/evaluator adapters may choose the current calendar date at
+their boundary; feature functions require a supplied date. No current-state
+calculation uses the newest history date as today. Historical review uses the
+session's date as its historical boundary and the supplied current `asOf` as its
+eligibility cutoff. Creating a session captures the local calendar date once;
+completion timestamps remain precise instants. Each new recommendation decision
+also captures coachingDate, so evening UTC timestamps cannot make current feedback
+appear to occur tomorrow. Legacy decisions retain their recorded timestamp date. Missing legacy dates and completion
+timestamps are not fabricated.
+
+| Fact | Authoritative owner | Consumers |
+| --- | --- | --- |
+| Valid completed sets and frozen prescription | WorkoutSession in persistence | TrainingState, historical review |
+| Actual per-exercise performance | features.ts, with comparisons in states.ts | TrainingState and historical analysis |
+| Current exercise/muscle features and recovery | TrainingState derived at asOf | Today, exercise library, generators, plan/split evaluation |
+| Current descriptive workload | TrainingState.workload via classifyRecentWorkload | Today workload label |
+| Session execution and coaching outcome | workout-analysis.ts, exposed by TrainingState.outcomes | History review, recommendation learning |
+| Behavioral evidence and cooldowns | coaching-preferences.ts | Shared candidate ranking and recommendation pipeline |
+| Final suggestions and suppression | recommendations.ts | Plans and explicit decision capture |
+| Active prescription and authority | Captured WorkoutSession | Logger, resume, completed history |
+
+Today, History and the exercise library receive the same application TrainingState.
+They do not reload independent history snapshots or reclassify raw sets. Empty
+prescribed sessions remain reviewable without adding training exposure. Historical
+review may contain unknown catalog movements without attributing them to muscles.
+
+Progression comparison runs in canonical pounds, including its absolute load
+comparison tolerance. Unit conversion is for display and prescription only;
+it never reruns classification under a different absolute tolerance. Missing
+legacy units mean pounds consistently. Cooldown context uses canonical load
+values, so a display-unit switch does not reopen a rejected optional replacement.
+Progression pathways use half-pound canonical buckets to absorb one-decimal
+conversion rounding; matching a previously accepted target permits at most a
+quarter-pound conversion difference and still requires the same rep range and
+exercise. This tolerance must not authorize a materially different target.
+
+The Keep plan control for a new optional suggestion records rejection. Dismissal
+of an already accepted suggestion remains a separate action. Derived behavioral
+settings never overwrite explicit preferences. Equipment and time adaptations
+remain contextual causes, and skipped sets never count as completed volume.
+
+### Release scenario coverage
+
+The deterministic suites cover the complete loop; fixtures supply dates and
+exercise/session IDs explicitly. The v1-consistency suite adds catalog-wide
+primary/secondary muscle attribution and cross-module lifecycle invariants.
+
+| Scenario | Main regression suite |
+| --- | --- |
+| No-history construction, priorities, goals and generated session independence | recommended-workout, training-loop |
+| Completing Upper chest work prevents immediate repeat; all primary muscles recover | v1-consistency (every catalog exercise) |
+| Successful progression, isolated weakness, repeated comparable decline | progression, history-intelligence, training-loop |
+| Single versus repeated rejection; continuity and optional ranking | coaching-preferences |
+| Cooldown exclusion and reopening for materially changed evidence | coaching-preferences, v1-consistency |
+| Equipment loss overrides continuity; 30-minute budget protects higher-value work | unified-decision-engine, adaptation, recommended-workout |
+| Context omission versus explicitly voluntary skips | coaching-preferences, post-workout-outcomes, v1-consistency |
+| Accepted target survives into prescription and execution outcome | post-workout-outcomes, v1-consistency |
+| History edit/delete changes state, review, behavior and next recommendation | v1-consistency, post-workout-outcomes |
+| Unit switching preserves classification, target acceptance and cooldown meaning | v1-consistency |
+| Refresh/resume and later plan/goal/preference/context changes preserve active work | v1-consistency, workout-session, storage |
+| Saved-plan deletion preserves the active session; generated sessions do not edit plans | v1-consistency, training-loop |
+| Incomplete legacy history/decisions and missing timestamps remain conservative | v1-consistency, workout-session, coaching-preferences |
+
+Legacy presentation implementations and the obsolete classifyFatigue alias are
+removed. Stored-data normalization remains. Explanations use selected evidence
+in plain language; internal state labels and scoring details remain inspectable
+in domain traces rather than being presented as coaching prose. No new major
+coaching subsystem, scheduling, periodization, deloads, LLM, dashboard, benchmark
+scheduler or backend migration is introduced.

@@ -1,3 +1,4 @@
+import { currentCoachingDate } from './coaching-date'
 import { deriveCoachingPreferences, compareCoachingPreference } from './coaching-preferences'
 import { deriveTrainingState, exerciseTrainingState, muscleTrainingState, isMuscleOpportunity } from './training-state'
 import { recommendExerciseLoadFromState } from './load-recommendation'
@@ -17,7 +18,7 @@ export const PLAN_FREQUENCY_OPPORTUNITIES = 3
 type PriorityAddReason = 'missing-slot' | 'low-volume' | 'low-frequency'
 
 export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: Workout[], preferences: UserPreferences, asOf?: string, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = [], context?: TodaysContext): ExerciseRecommendationCandidate[] {
-  const state = deriveTrainingState(exercises, history, asOf ?? new Date().toISOString().slice(0, 10), preferences.weightUnit, resolveMusclePriorities(preferences).orderedMuscles)
+  const state = deriveTrainingState(exercises, history, asOf ?? currentCoachingDate(), preferences.weightUnit, resolveMusclePriorities(preferences).orderedMuscles)
   return evaluatePlanFromState(plan, exercises, state, preferences, availableLoads, decisions, context)
 }
 

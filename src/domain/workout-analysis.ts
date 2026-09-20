@@ -70,8 +70,8 @@ export type WorkoutAnalysis = PostWorkoutAnalysis
  * reflected immediately. It neither mutates plans nor persists stale verdicts.
  * Trend decisions use the same conservative comparison as future coaching.
  */
-export function analyzeWorkoutSession(session: WorkoutSession, history: WorkoutSession[], catalog: Exercise[]): WorkoutAnalysis | undefined {
-  if (session.status === 'in-progress') return undefined
+export function analyzeWorkoutSession(session: WorkoutSession, history: WorkoutSession[], catalog: Exercise[], asOf = session.date): WorkoutAnalysis | undefined {
+  if (session.status === 'in-progress' || session.date > asOf) return undefined
   session = { ...session, sets: session.sets.filter(validSet) }
   const prior = history.filter((item) => isEarlierSession(item, session)).sort(compareWorkoutChronology)
   // Compare like units even when the user's display preference has changed.

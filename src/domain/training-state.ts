@@ -2,7 +2,8 @@ import { calculateExerciseFeatures, calculateMuscleFeatures } from './features'
 import { analyzeWorkoutSession } from './workout-analysis'
 import { compareWorkoutChronology } from './workout-session'
 import { sameMuscle } from './muscle-priorities'
-import { displayWeight } from './units'
+import { convertWeight, displayExerciseFeatures } from './units'
+import { classifyRecentWorkload } from './states'
 import type { Exercise, ExerciseFeatures, MuscleFeatures, MuscleTrainingState, TrainingState, WeightUnit, Workout } from './models'
 
 /**
@@ -15,15 +16,15 @@ export function deriveTrainingState(exercises: Exercise[], history: Workout[], a
     && /^\d{4}-\d{2}-\d{2}$/.test(workout.date) && Number.isFinite(Date.parse(workout.date))
     && new Date(workout.date).toISOString().slice(0, 10) === workout.date && workout.date <= asOf)
     .map((workout) => ({ ...workout, sets: workout.sets.filter((set) => Number.isFinite(set.reps) && set.reps > 0 && Number.isFinite(set.weight) && set.weight >= 0) }))
-  const completed = eligible.map((workout) => ({ ...workout, unit, sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(set.weight, workout.unit, unit) })) }))
+  const completed = eligible.map((workout) => ({ ...workout, unit: 'lb' as const, sets: workout.sets.map((set) => ({ ...set, weight: convertWeight(set.weight, workout.unit ?? 'lb', 'lb') })) }))
   const knownIds = new Set(exercises.map((exercise) => exercise.id))
   const muscles = [...exercises.flatMap((exercise) => exercise.primaryMuscles), ...additionalMuscles]
     .filter((muscle, index, all) => all.findIndex((other) => sameMuscle(muscle, other)) === index)
   return {
-    asOf, unit,
-    outcomes: eligible.filter((workout) => workout.exerciseOmissions?.length || workout.prescriptionChanges?.length || workout.sets.some((set) => set.setType === 'working' && knownIds.has(set.exerciseId)))
-      .sort(compareWorkoutChronology).map((workout) => analyzeWorkoutSession(workout, eligible, exercises)!),
-    exercises: exercises.map((exercise) => calculateExerciseFeatures(exercise, completed, asOf)),
+    asOf, unit, workload: classifyRecentWorkload(eligible, asOf),
+    outcomes: eligible.filter((workout) => workout.plannedExercises?.length || workout.exerciseOmissions?.length || workout.prescriptionChanges?.length || workout.sets.some((set) => set.setType === 'working' && knownIds.has(set.exerciseId)))
+      .sort(compareWorkoutChronology).map((workout) => analyzeWorkoutSession(workout, eligible, exercises, asOf)!),
+    exercises: exercises.map((exercise) => displayExerciseFeatures(calculateExerciseFeatures(exercise, completed, asOf), unit)),
     muscles: muscles.map((muscle) => {
       const features = calculateMuscleFeatures(muscle, exercises, completed, asOf)
       const recovery: MuscleTrainingState['recovery'] = features.daysSinceTrained === undefined ? 'unknown'
