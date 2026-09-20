@@ -218,7 +218,7 @@ describe('plan evaluation', () => {
     expect(replacement?.trace.ruleId).toBe('replace-on-stall')
   })
 
-  it('backs off a replacement after two keep-plan decisions while an unopposed stall still recommends one', () => {
+  it('does not permanently suppress a stall replacement from undated legacy dismissal and rejection', () => {
     const history = [workout('a', '2026-08-20', bench.id, 8), workout('b', '2026-08-25', bench.id, 8), workout('c', '2026-09-01', bench.id, 8)]
     const decisions: RecommendationDecision[] = [
       { id: '1', recommendationId: 'replace-upper-incline-db-bench', recommendationType: 'REPLACE', exerciseId: bench.id, decision: 'dismissed' },
@@ -226,7 +226,7 @@ describe('plan evaluation', () => {
     ]
 
     expect(evaluatePlan(plan, exercises, history, { ...defaultPreferences, goals: ['Get stronger'] }, '2026-09-09').some((item) => item.type === 'REPLACE')).toBe(true)
-    expect(evaluatePlan(plan, exercises, history, { ...defaultPreferences, goals: ['Get stronger'] }, '2026-09-09', undefined, decisions).some((item) => item.type === 'REPLACE')).toBe(false)
+    expect(evaluatePlan(plan, exercises, history, { ...defaultPreferences, goals: ['Get stronger'] }, '2026-09-09', undefined, decisions).some((item) => item.type === 'REPLACE')).toBe(true)
   })
 
   it('prefers a muscle-specific isolation replacement and traces that preference', () => {

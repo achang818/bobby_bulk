@@ -45,6 +45,8 @@ export interface RecommendationOutcome {
 }
 
 export interface PostWorkoutAnalysis {
+  prescriptionChanges?: SessionPrescriptionChange[]
+  exerciseOmissions?: WorkoutSession['exerciseOmissions']
   sessionId: string
   date: string
   completedAt?: string
@@ -130,6 +132,7 @@ export function analyzeWorkoutSession(session: WorkoutSession, history: WorkoutS
     ? 'A single weaker session will not trigger a regression-based exercise replacement. '
     : ''
   return {
+    prescriptionChanges: structuredClone(session.prescriptionChanges ?? []), exerciseOmissions: structuredClone(session.exerciseOmissions ?? []),
     sessionId: session.id, date: session.date, ...(session.completedAt ? { completedAt: session.completedAt } : {}), planningAuthority, loggedSets: session.sets.length, workingSets,
     plannedSets, completedPlannedSets,
     extraSets: session.sets.length - completedPlannedSets,
@@ -163,7 +166,7 @@ function describeExecution(outcome: SessionExerciseAssessment, session: WorkoutS
     : outcome.signal === 'watch' ? outcome.progressionState === 'regressing' ? 'repeated-underperformance' : 'isolated-underperformance'
       : outcome.signal === 'no-working-sets' ? 'not-performed' : outcome.signal
   const observations: string[] = []
-  if (status === 'skipped') observations.push('No prescribed sets logged. The reason is unknown; this does not imply dislike or a performance decline.')
+  if (status === 'skipped') observations.push(session.exerciseOmissions?.find((item) => item.exerciseId === outcome.exerciseId)?.reason === 'voluntary' ? 'You recorded a voluntary skip. One choice does not establish an exercise preference.' : 'No prescribed sets logged. Missing work alone does not imply dislike or a performance decline.')
   if (status === 'partial') observations.push('Some prescribed sets were logged; missing work is not counted as completed volume.')
   if (status === 'ad-hoc') observations.push('Additional exercise performed without an original session prescription.')
   if (prescription && outcome.completedSets > prescription.sets) observations.push(`${outcome.completedSets - prescription.sets} more sets logged than prescribed.`)

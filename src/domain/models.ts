@@ -103,6 +103,7 @@ export interface WorkoutSession {
   adaptationNotes?: string[]
   /** Frozen causal record; outcomes are always re-derived from actual sets. */
   prescriptionChanges?: SessionPrescriptionChange[]
+  exerciseOmissions?: { exerciseId: string; reason: 'voluntary' | 'time' | 'equipment' }[]
   /** Whether this session came from Bobby's generated workout or a user-owned plan. */
   planningAuthority?: PlanningAuthority
   /** Snapshot of the plan when the session began; legacy history has none. */
@@ -190,6 +191,7 @@ export interface ExerciseCandidate {
   goalMatch: boolean
   priorityMuscleRank?: number
   preference: PreferenceState
+  behavioralEvidence?: import('./coaching-preferences').ExercisePreferenceEvidence
   preferenceAdjustment: 'boost' | 'none' | 'penalty' | 'excluded'
   reasons: string[]
 }
@@ -211,6 +213,7 @@ export interface ExerciseCandidateRequest {
   constraints?: ExerciseCandidateConstraints
   preferences?: Pick<UserPreferences, 'preferredExerciseIds' | 'recommendLessExerciseIds' | 'excludedExerciseIds' | 'dislikedExerciseIds'>
   decisions?: RecommendationDecision[]
+  coachingPreferences?: import('./coaching-preferences').CoachingPreferenceState
 }
 
 /** Shared replacement request. The caller establishes whether replacement is warranted first. */
@@ -224,6 +227,7 @@ export interface ExerciseReplacementRequest {
   constraints?: ExerciseCandidateConstraints
   preferences?: ExerciseCandidateRequest['preferences']
   decisions?: RecommendationDecision[]
+  coachingPreferences?: import('./coaching-preferences').CoachingPreferenceState
 }
 
 /** Candidate evidence is retained so callers can explain both eligibility and selection. */
@@ -446,6 +450,7 @@ export type RecommendationChange =
 
 /** Final deterministic output of Bobby's recommendation pipeline. */
 export interface Recommendation {
+  feedbackContext?: string
   id: string
   type: PlanRecommendationType
   /** Ordering priority only; it is not a quality, utility, or probability score. */

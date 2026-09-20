@@ -1,3 +1,4 @@
+import { deriveCoachingPreferences, recentlyDeclined, recommendationFeedbackContext, progressionPathway } from './coaching-preferences'
 import { adaptWorkout, adaptWorkoutForTime, MINUTES_PER_WORKING_SET, MINUTES_PER_EXERCISE_TRANSITION } from './adaptation'
 import { resolveMusclePriorities } from './muscle-priorities'
 import { evaluatePlanFromState } from './plan-evaluator'
@@ -34,7 +35,7 @@ export function generateRecommendations(input: RecommendationInput): Recommendat
 
 export interface CandidateSuppression {
   candidateId: string
-  code: 'required-removal' | 'equipment' | 'recovery' | 'near-failure' | 'productive-progression' | 'time-limit' | 'recent-frequency' | 'incompatible-action' | 'duplicate'
+  code: 'required-removal' | 'equipment' | 'recovery' | 'near-failure' | 'productive-progression' | 'time-limit' | 'recent-frequency' | 'incompatible-action' | 'duplicate' | 'recently-declined' | 'unsupported-progression'
   reason: string
   winnerId?: string
 }
@@ -52,12 +53,13 @@ export function generateRecommendationsWithTrace(input: RecommendationInput) {
   const asOf = input.asOf ?? input.trainingState?.asOf ?? new Date().toISOString().slice(0, 10)
   const priorityProfile = resolveMusclePriorities(preferences)
   const trainingState = resolveTrainingState(exercises, history, asOf, preferences.weightUnit, priorityProfile.orderedMuscles, input.trainingState)
+  const coachingPreferences = deriveCoachingPreferences(trainingState, decisions)
   const planned = plannedExercisesFor(plan, exercises)
   const goalCriticalExerciseIds = planned
     .filter(({ exerciseId }) => exercises.find((exercise) => exercise.id === exerciseId)?.primaryMuscles.some((muscle) => priorityProfile.rankOf(muscle) !== undefined))
     .map(({ exerciseId }) => exerciseId)
   const userOwnsPlan = (input.authority ?? plan.planningAuthority ?? 'user-plan') === 'user-plan'
-  const equipment = adaptWorkout(plan, exercises, todaysContext, preferences)
+  const equipment = adaptWorkout(plan, exercises, todaysContext, preferences, preferences.defaultGymId, coachingPreferences)
   const omitted = new Set(equipment.filter((candidate) => candidate.type === 'REMOVE').map((candidate) => candidate.exerciseId))
   const timePlan = { ...plan, plannedExercises: planned.filter((slot) => !omitted.has(slot.exerciseId)) }
   const candidates: RecommendationCandidate[] = [
@@ -72,8 +74,23 @@ export function generateRecommendationsWithTrace(input: RecommendationInput) {
   const recommendations = finalCandidates
     .map((candidate) => toRecommendation(candidate, exercises))
     .filter((recommendation): recommendation is Recommendation => recommendation !== undefined)
+    .map((recommendation) => ({ ...recommendation, feedbackContext: recommendationFeedbackContext(recommendation, trainingState, preferences, todaysContext, exercises) }))
+    .filter((recommendation) => {
+      if (recentlyDeclined(recommendation, decisions, plan.id, asOf)) {
+        suppressed.push({ candidateId: recommendation.id, code: 'recently-declined', reason: 'This optional proposal was recently rejected and no material evidence has changed.' }); return false
+      }
+      return true
+    })
+    .map((recommendation): Recommendation => {
+      const pathway = progressionPathway(recommendation, trainingState.unit)
+      const learning = coachingPreferences.recommendationLearning.find((item) => item.pathway === pathway && item.deferRepeat)
+      if (!learning) return recommendation
+      suppressed.push({ candidateId: recommendation.id, code: 'unsupported-progression', reason: learning.reason })
+      return { ...recommendation, id: `outcome-keep-${recommendation.id}`, type: 'KEEP', change: { kind: 'keep' }, reason: learning.reason, trace: buildTrace('keep-stable-exercise') }
+    })
+    .filter((recommendation, _index, all) => recommendation.type !== 'KEEP' || recommendation.id.startsWith('outcome-keep-') || !all.some((other) => other.id.startsWith('outcome-keep-') && JSON.stringify(other.target) === JSON.stringify(recommendation.target)))
     .sort((left, right) => compareFinalRecommendations(left, right, exerciseOrder))
-  return { trainingState, candidates, suppressed, recommendations }
+  return { trainingState, coachingPreferences, candidates, suppressed, recommendations }
 }
 
 /** Structural and semantic precedence, independent of producer insertion order. */

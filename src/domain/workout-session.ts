@@ -180,6 +180,7 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
     ...(raw.gym ? { gym: structuredClone(raw.gym) } : {}),
     ...(raw.context ? { context: structuredClone(raw.context) } : {}),
     ...(Array.isArray(raw.adaptationNotes) ? { adaptationNotes: raw.adaptationNotes.filter((note) => typeof note === 'string') } : {}),
+    ...(Array.isArray(raw.exerciseOmissions) ? { exerciseOmissions: raw.exerciseOmissions.filter((item) => typeof item.exerciseId === 'string' && ['voluntary', 'time', 'equipment'].includes(item.reason)).map((item) => ({ ...item })) } : {}),
     ...(Array.isArray(raw.prescriptionChanges) ? { prescriptionChanges: structuredClone(raw.prescriptionChanges) } : {}),
     planningAuthority: raw.planningAuthority ?? 'user-plan',
     // Incomplete historical snapshots cannot establish an original prescription.

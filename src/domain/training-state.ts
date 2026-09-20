@@ -21,7 +21,7 @@ export function deriveTrainingState(exercises: Exercise[], history: Workout[], a
     .filter((muscle, index, all) => all.findIndex((other) => sameMuscle(muscle, other)) === index)
   return {
     asOf, unit,
-    outcomes: eligible.filter((workout) => workout.prescriptionChanges?.length || workout.sets.some((set) => set.setType === 'working' && knownIds.has(set.exerciseId)))
+    outcomes: eligible.filter((workout) => workout.exerciseOmissions?.length || workout.prescriptionChanges?.length || workout.sets.some((set) => set.setType === 'working' && knownIds.has(set.exerciseId)))
       .sort(compareWorkoutChronology).map((workout) => analyzeWorkoutSession(workout, eligible, exercises)!),
     exercises: exercises.map((exercise) => calculateExerciseFeatures(exercise, completed, asOf)),
     muscles: muscles.map((muscle) => {

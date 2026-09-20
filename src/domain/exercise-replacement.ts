@@ -16,6 +16,7 @@ export function findExerciseReplacement(request: ExerciseReplacementRequest): Ex
     constraints: request.constraints,
     preferences: request.preferences,
     decisions: request.decisions,
+    coachingPreferences: request.coachingPreferences,
   })
   const rankedCandidates = rankExerciseCandidates(consideredCandidates)
   return {

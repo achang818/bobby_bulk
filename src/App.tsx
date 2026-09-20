@@ -135,7 +135,7 @@ function App() {
     const workoutsInCurrentUnit = useMemo(() => workouts.map((workout) => ({ ...workout, unit: preferences.weightUnit, sets: workout.sets.map((set) => ({ ...set, weight: displayWeight(effectiveLoad(set, preferences.bodyweightLb), workout.unit, preferences.weightUnit), })), })), [preferences.bodyweightLb, preferences.weightUnit, workouts]);
     const previewDate = new Date().toISOString().slice(0, 10);
     const trainingState = useMemo(() => deriveTrainingState(exercises, workouts, previewDate, preferences.weightUnit, resolveMusclePriorities(preferences).orderedMuscles), [workouts, previewDate, preferences]);
-    const recommendedInput = useMemo(() => ({ exercises, history: workouts, preferences, todaysContext: gymContext, asOf: previewDate, trainingState }), [workouts, preferences, gymContext, previewDate, trainingState]);
+    const recommendedInput = useMemo(() => ({ exercises, history: workouts, preferences, todaysContext: gymContext, asOf: previewDate, trainingState, decisions: recommendationDecisions }), [workouts, preferences, gymContext, previewDate, trainingState, recommendationDecisions]);
     const basePreview = useMemo(() => generateRecommendedWorkout(recommendedInput), [recommendedInput]);
     const [exerciseChoices, setExerciseChoices] = useState<{ base: RecommendedWorkout; skippedIds: string[] }>();
     const skippedIds = exerciseChoices?.base === basePreview ? exerciseChoices.skippedIds : [];
@@ -317,6 +317,7 @@ function App() {
                     </button>
                     {selectedExerciseId === id && <div className="logger-set-entry">
                         <LoadTarget recommendation={plannedExercise?.loadRecommendation} />
+                        {activeSession?.plannedExercises?.some((slot) => slot.exerciseId === id && slot.setType === 'working') && !loggedSets.some((set) => set.setType === 'working') && <label>Skipping this movement? (optional)<select aria-label={`Skip reason for ${exercise.name}`} value={activeSession.exerciseOmissions?.find((item) => item.exerciseId === id)?.reason ?? ''} onChange={(event) => { const reason = event.target.value as 'voluntary' | 'time' | 'equipment' | ''; setActiveSession((current) => current ? { ...current, exerciseOmissions: [...(current.exerciseOmissions ?? []).filter((item) => item.exerciseId !== id), ...(reason ? [{ exerciseId: id, reason }] : [])] } : current) }}><option value="">No reason recorded</option><option value="voluntary">I choose not to do this movement</option><option value="time">Not enough time</option><option value="equipment">Equipment unavailable</option></select></label>}
                         <details className="logger-exercise-picker"><summary>Switch or add an exercise</summary>
                             <div className="logger-picker-heading"><strong>Switch exercise</strong><small>Add any movement for this session only.</small></div>
                             <label>Search movements<input type="search" value={exerciseSearch} onChange={(event) => setExerciseSearch(event.target.value)} placeholder="e.g. lat pulldown" /></label>

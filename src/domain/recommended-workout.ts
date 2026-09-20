@@ -1,3 +1,4 @@
+import { deriveCoachingPreferences, behavioralBias, calibrateProgressionLoad, type CoachingPreferenceState } from './coaching-preferences'
 import { MINUTES_PER_EXERCISE_TRANSITION, MINUTES_PER_WORKING_SET } from './adaptation'
 import { isExerciseAvailable } from './equipment'
 import { findExerciseCandidates } from './exercise-intelligence'
@@ -21,6 +22,7 @@ export interface RecommendedWorkoutInput {
   todaysContext: TodaysContext
   availableLoads?: AvailableLoad[]
   asOf?: string
+  decisions?: import('./models').RecommendationDecision[]
   trainingState?: TrainingState
 }
 
@@ -56,11 +58,12 @@ export function generateRecommendedWorkout(input: RecommendedWorkoutInput): Reco
   return generateFromTrainingState(resolveTrainingInput(input))
 }
 
-type TrainingInput = Omit<RecommendedWorkoutInput, 'history' | 'asOf' | 'trainingState'> & { trainingState: TrainingState }
+type TrainingInput = Omit<RecommendedWorkoutInput, 'history' | 'asOf' | 'trainingState'> & { trainingState: TrainingState; coachingPreferences: CoachingPreferenceState }
 
 function resolveTrainingInput(input: RecommendedWorkoutInput): TrainingInput {
   const { history, asOf = input.trainingState?.asOf ?? new Date().toISOString().slice(0, 10), trainingState, ...context } = input
-  return { ...context, trainingState: resolveTrainingState(input.exercises, history, asOf, input.preferences.weightUnit, resolveMusclePriorities(input.preferences).orderedMuscles, trainingState) }
+  const resolved = resolveTrainingState(input.exercises, history, asOf, input.preferences.weightUnit, resolveMusclePriorities(input.preferences).orderedMuscles, trainingState)
+  return { ...context, trainingState: resolved, coachingPreferences: deriveCoachingPreferences(resolved, input.decisions) }
 }
 
 function generateFromTrainingState(input: TrainingInput): RecommendedWorkout {
@@ -68,7 +71,7 @@ function generateFromTrainingState(input: TrainingInput): RecommendedWorkout {
   const selected = selectExercises(targets, input, DEFAULT_EXERCISE_BUDGET)
   const plannedExercises = fitToTime(selected.slice(0, targetLimit(input.todaysContext.availableMinutes)), input.todaysContext.availableMinutes).map((planned) => ({
     ...planned,
-    loadRecommendation: recommendExerciseLoadFromState(input.exercises.find((exercise) => exercise.id === planned.exerciseId)!, planned, exerciseTrainingState(input.trainingState, planned.exerciseId), input.trainingState.unit, input.availableLoads),
+    loadRecommendation: calibrateProgressionLoad(recommendExerciseLoadFromState(input.exercises.find((exercise) => exercise.id === planned.exerciseId)!, planned, exerciseTrainingState(input.trainingState, planned.exerciseId), input.trainingState.unit, input.availableLoads), planned, input.coachingPreferences),
   }))
   const includedExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
   // Keep focus in allocation order, not accidental compound-first logger order.
@@ -82,7 +85,7 @@ function generateFromTrainingState(input: TrainingInput): RecommendedWorkout {
       ? `A shorter workout to fit your ${input.todaysContext.availableMinutes}-minute limit.`
       : `Only ${plannedExercises.length} suitable ${plannedExercises.length === 1 ? 'movement fits' : 'movements fit'} your recent training, equipment, goals, and exercise choices. Extra overlapping work has not been added just to fill the session.`
     : undefined
-  const reasons = uniqueReasons([...selectionReasons(targets, finalSelection, input), ...(sessionNote ? [sessionNote] : [])])
+  const reasons = uniqueReasons([...selectionReasons(targets, finalSelection, input), ...finalSelection.flatMap(({ exercise }) => { const evidence = input.coachingPreferences.exercises.find((item) => item.exerciseId === exercise.id); return evidence && evidence.state !== 'neutral' ? [`${exercise.name}: ${evidence.state.replaceAll('-', ' ')}. ${evidence.reasons.join(' ')}`] : [] }), ...(sessionNote ? [sessionNote] : [])])
   const workout: WorkoutTemplate = {
     id: 'recommended-workout',
     name: 'Recommended workout',
@@ -110,6 +113,7 @@ function skipFromTrainingState(input: TrainingInput, current: RecommendedWorkout
     exercise: original, exercises: input.exercises, goals: input.preferences.goals,
     priorityMuscles: resolveMusclePriorities(input.preferences).orderedMuscles,
     preferences: input.preferences,
+    coachingPreferences: input.coachingPreferences,
     constraints: { ...input.todaysContext, excludedExerciseIds: [...skippedIds, ...slots.map((item) => item.exerciseId)], requireSameCategory: true },
   }).find(({ exercise, roleMatch, compatibility }) => roleMatch === 'preserved' && compatibility !== 'weak'
     && matchesGoals(exercise, input.preferences)
@@ -120,7 +124,7 @@ function skipFromTrainingState(input: TrainingInput, current: RecommendedWorkout
     if (item !== slot) return [item]
     if (!replacement) return []
     const next = { ...createPlannedExercise(replacement.id, item.order, replacement), sets: item.sets, setType: item.setType }
-    return [{ ...next, loadRecommendation: recommendExerciseLoadFromState(replacement, next, exerciseTrainingState(input.trainingState, replacement.id), input.trainingState.unit) }]
+    return [{ ...next, loadRecommendation: calibrateProgressionLoad(recommendExerciseLoadFromState(replacement, next, exerciseTrainingState(input.trainingState, replacement.id), input.trainingState.unit), next, input.coachingPreferences) }]
   }).map((item, order) => item.order === order ? item : { ...item, order })
   const message = replacement ? `Switched ${original.name} to ${replacement.name} for this workout.`
     : `No suitable alternative to ${original.name} fits your current settings and recent training. Removed it from this workout.`
@@ -280,11 +284,13 @@ function exerciseSelectionOrder(left: Exercise, right: Exercise, input: Training
   const leftPreference = classifyPreference(left.id, input.preferences)
   const rightPreference = classifyPreference(right.id, input.preferences)
   const preference = preferenceRank(rightPreference) - preferenceRank(leftPreference)
-  if (preference) return preference
   const leftFeatures = exerciseTrainingState(input.trainingState, left.id)
   const rightFeatures = exerciseTrainingState(input.trainingState, right.id)
   const progression = progressionRank(rightFeatures) - progressionRank(leftFeatures)
   if (progression) return progression
+  if (preference) return preference
+  const behavior = behavioralBias(right.id, input.coachingPreferences) - behavioralBias(left.id, input.coachingPreferences)
+  if (behavior) return behavior
   // Useful history favors continuity. Recent use alone never creates a penalty.
   const history = rightFeatures.sessionsPerformed - leftFeatures.sessionsPerformed
   if (history) return history
@@ -293,7 +299,7 @@ function exerciseSelectionOrder(left: Exercise, right: Exercise, input: Training
 }
 
 function progressionRank(features: ExerciseFeatures) {
-  return features.progressionState === 'progressing' ? 3 : features.progressionState === 'stable' ? 2 : features.progressionState === 'insufficient history' ? 1 : 0
+  return features.progressionState === 'progressing' ? 3 : features.progressionState === 'stable' ? 2 : 0
 }
 
 function fitToTime(selected: SelectedExercise[], availableMinutes: number | undefined) {

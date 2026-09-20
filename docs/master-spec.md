@@ -1407,27 +1407,14 @@ Result
 Future Recommendation
 ```
 
-This allows Bobby to learn user preferences without machine learning.
+This allows Bobby to derive conservative behavioral evidence without machine learning or changing explicit user settings.
 
-For example:
+Repeated independent rejection of optional Cable Fly replacements can establish
+continuity evidence. A single rejection remains limited evidence; neither changes
+the explicit preference to preferred. Recent rejected proposals receive a temporary
+cooldown, with material new evidence allowing earlier reconsideration. Behavioral
+preference never creates a permanent exclusion.
 
-```text id="w3v1xx"
-Bobby:
-Replace Cable Fly
-
-User:
-Reject
-
-→ Cable Fly receives a preference boost
-```
-
-But:
-
-```text id="w9u2p1"
-Preference ≠ permanent exclusion
-```
-
-Bobby can recommend it again if the evidence becomes strong enough.
 
 ---
 
@@ -1657,9 +1644,10 @@ Context-driven removal is an intentional omission from the session prescription,
 not a skipped prescribed exercise. Execution alone does not distinguish voluntary
 skipping from accidental/partial completion; record the cause as unknown unless
 explicitly captured. Neither skipped work nor contextual omissions write preferred,
-recommend-less, or excluded preferences, and no implicit preference learning is
-introduced by this milestone. Explicit recommendation decisions remain distinct
-from these execution facts.
+recommend-less, or excluded preferences. The separate adaptive preference layer
+may use repeated explicitly recorded voluntary choices; unknown completion and
+context-driven omissions remain ineligible. Recommendation outcomes remain
+distinct from behavioral preferences.
 
 TrainingState exposes rederived session outcomes alongside its real-set features.
 The summary and future coaching can inspect demonstrated recommendation loads,
@@ -1673,6 +1661,82 @@ The existing session review shows original targets, neutral execution observatio
 performance comparisons, and coaching-change outcomes. This is not a new analytics
 dashboard. No general-purpose ranking rules, LLM coaching, speculative recovery,
 deloads, periodization, automatic splits, scheduling, or benchmarking are introduced.
+
+### Adaptive Preference & Recommendation Learning
+
+Three independent concepts must remain inspectable:
+
+* Explicit settings: preferred, neutral, recommend-less and excluded. Behavioral
+  evidence never writes UserPreferences. Exclusion is a hard selection constraint.
+* CoachingPreferenceState / ExercisePreferenceEvidence: neutral,
+  continuity-favored, variation-tolerant or recommend-less-evidence, with separate
+  confidence, dated facts, source decision/session IDs and deterministic reasons.
+* RecommendationLearning: accepted progression pathways supported or unsupported
+  by completed ordinary working sets, retaining the contributing session IDs.
+  This does not supply exercise preference votes.
+
+Evidence uses a rolling 90-day window. At most one vote per exercise, direction
+and calendar day counts; repeated clicks on one proposal are resolved by the last
+response that day. Two independent explicit choices establish a directional state
+with moderate confidence; four unopposed choices give strong confidence. One event
+stays neutral/limited. Tied conflicting directions remain neutral. These are
+conservative product thresholds, not physiological claims or permanent labels.
+Full-provenance optional REPLACE/REMOVE rejections and explicitly accepted KEEP
+choices support continuity. Repeated optional ADD rejections and explicitly
+recorded voluntary skips support recommend-less evidence. Repeated acceptance of
+optional replacement supports variation tolerance for the original movement;
+it does not label the original disliked or the replacement a favorite.
+Successful stable/improving execution is supporting context only and cannot
+establish a behavioral state without deliberate user choices.
+
+Legacy decisions without proposal context or a valid date remain inspectable,
+limited evidence and cannot establish a directional state. Dismissals, progression
+success/failure, contextual equipment/time adaptations, superseded generated
+choices, unknown partial completion and special-set behavior contribute no votes.
+The logger offers an optional omission reason for an unperformed prescribed
+working movement: voluntary, time or unavailable equipment. Logging working sets
+invalidates skip evidence; omitting a reason means unknown. This records a choice
+without changing the frozen prescription or fabricating completed volume.
+
+Selection retains hard feasibility and muscle recovery/need first, then productive
+continuity, explicit preference, behavioral tie-breakers, and optional variety.
+The structural substitution pipeline ranks explicit preference before behavioral
+bias after role, compatibility, goal and direct-target constraints. This shared
+ranking covers equipment substitutes and stalled/regressing replacement choices.
+Recommended Workout includes behavioral tie-breakers and visible selection
+reasons; user-plan priority ADD ranking uses the same preference distinction.
+The recommendation trace exposes coachingPreferences and suppression diagnostics.
+User-owned plans change only through explicitly accepted authorized actions;
+active sessions remain frozen when feedback or future recommendations change.
+
+An identical optional rejected proposal is suppressed for 14 days unless its
+recorded feedback context materially changes. Identity includes type, target,
+change payload and rule, not generated ID, display reason or priority. The context
+captures goals, ordered priorities, explicit preferences, equipment/gym/time,
+catalog availability and relevant performance state, best working-set evidence,
+and every two completed exercise exposures. Ordering inputs does not reopen it.
+This bounded context snapshot is frozen with the displayed proposal and decision.
+Legacy dated decisions without that context get only a three-day cooldown;
+undated decisions cannot impose a cooldown. Newer acceptance cancels a rejection.
+Hard equipment/time adaptations bypass optional rejection suppression. Cooldowns
+expire, and regression/stall transitions or changed goals/equipment/preferences
+can reopen proposals immediately subject to ordinary recovery/feasibility rules.
+
+Recommendation outcomes are rederived from TrainingState session analyses, never
+persisted as a second truth. Pathways identify exercise, unit-normalized target
+load and rep range. Two latest unsupported accepted attempts on different dates
+within the evidence window defer repeating that exact pathway for 14 days after
+the latest attempt. A later supported attempt clears deferral. Plan suggestions
+explain holding the current prescription; generated sessions ask for a manageable
+load instead of repeating the unsupported target. Different chosen loads,
+unattempted targets, contextual omissions and special sets are not failed tests.
+One unsupported attempt never establishes this deferral. Editing or deleting
+history recomputes both outcome learning and voluntary-skip evidence immediately.
+
+No machine learning, LLM explanations, automatic goals, hidden preference mutation,
+scheduling, periodization, automatic splits, deloads, dashboard or benchmark
+scheduler is part of this milestone.
+
 
 ### Entities and relationships
 

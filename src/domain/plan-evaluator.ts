@@ -1,9 +1,10 @@
+import { deriveCoachingPreferences, compareCoachingPreference } from './coaching-preferences'
 import { deriveTrainingState, exerciseTrainingState, muscleTrainingState, isMuscleOpportunity } from './training-state'
 import { recommendExerciseLoadFromState } from './load-recommendation'
 import { isExerciseAvailable } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
 import { buildTrace, compareRecommendations } from './rules'
-import { classifyPreference, rejectedKeepCount } from './states'
+import { classifyPreference } from './states'
 import { hasHypertrophyGoal, resolveMusclePriorities } from './muscle-priorities'
 import { plannedExercisesFor } from './workout-session'
 import type { AvailableLoad, ExerciseFeatures, MuscleFeatures, TrainingState, Exercise, ExerciseRecommendationCandidate, RecommendationDecision, TodaysContext, UserPreferences, Workout, WorkoutPlan } from './models'
@@ -22,6 +23,7 @@ export function evaluatePlan(plan: WorkoutPlan, exercises: Exercise[], history: 
 
 /** Candidate producer; the composition boundary supplies all historical evidence. */
 export function evaluatePlanFromState(plan: WorkoutPlan, exercises: Exercise[], state: TrainingState, preferences: UserPreferences, availableLoads?: AvailableLoad[], decisions: RecommendationDecision[] = [], context?: TodaysContext): ExerciseRecommendationCandidate[] {
+  const coachingPreferences = deriveCoachingPreferences(state, decisions)
   const recommendations: ExerciseRecommendationCandidate[] = []
   const plannedExercises = plannedExercisesFor(plan, exercises)
   const planExerciseIds = new Set(plannedExercises.map((planned) => planned.exerciseId))
@@ -36,7 +38,7 @@ export function evaluatePlanFromState(plan: WorkoutPlan, exercises: Exercise[], 
   const priorityAddExerciseIds = new Set<string>()
 
   for (const { exercise, planned } of planExercises) {
-    if (context && !isExerciseAvailable(exercise, context)) continue
+    if (classifyPreference(exercise.id, preferences) === 'excluded' || (context && !isExerciseAvailable(exercise, context))) continue
     const features = exerciseTrainingState(state, exercise.id)
     const load = recommendExerciseLoadFromState(exercise, planned, features, state.unit, availableLoads)
     const progression = load.kind === 'target'
@@ -50,10 +52,10 @@ export function evaluatePlanFromState(plan: WorkoutPlan, exercises: Exercise[], 
     }
     if (features.sessionsPerformed >= 2 && goalAligned && preferenceState !== 'excluded' && ['progressing', 'stable'].includes(features.progressionState)) {
       const trace = buildTrace('keep-stable-exercise')
-      recommendations.push({ id: `keep-${plan.id}-${exercise.id}`, type: 'KEEP', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 5 : 4, reasons: [trace.principleDescription, `Your recent performance is ${features.progressionState}.`], trace })
+      recommendations.push({ id: `keep-${plan.id}-${exercise.id}`, type: 'KEEP', exerciseId: exercise.id, score: features.progressionState === 'progressing' ? 5 : 4, reasons: [trace.principleDescription, `Your recent performance is ${features.progressionState}.`, ...(coachingPreferences.exercises.find((item) => item.exerciseId === exercise.id)?.reasons ?? [])], trace })
     }
     const replacementReason = features.progressionState === 'stalled' ? 'stalled' : features.progressionState === 'regressing' ? 'regressing' : undefined
-    if (features.sessionsPerformed >= 3 && replacementReason && preferenceState !== 'excluded' && rejectedKeepCount(exercise.id, decisions) < 2) {
+    if (features.sessionsPerformed >= 3 && replacementReason && preferenceState !== 'excluded') {
       // The state establishes that replacement is warranted. Candidate
       // eligibility and ranking are shared with contextual substitutions.
       const replacement = findExerciseReplacement({
@@ -65,6 +67,7 @@ export function evaluatePlanFromState(plan: WorkoutPlan, exercises: Exercise[], 
         constraints: { availableEquipment: context?.availableEquipment, unavailableEquipment: context?.unavailableEquipment, excludedExerciseIds: [...planExerciseIds], requireSameCategory: true },
         preferences,
         decisions,
+        coachingPreferences,
       })
       const alternative = replacement.rankedCandidates.find((candidate) => candidate.exercise.primaryMuscles.every((muscle) => isMuscleOpportunity(muscleTrainingState(state, muscle))))
       if (alternative) {
@@ -83,7 +86,7 @@ export function evaluatePlanFromState(plan: WorkoutPlan, exercises: Exercise[], 
     // A priority add is valid on its own merits. Session "coherence" is not a
     // hard constraint: it must never silently suppress an otherwise valid
     // priority recommendation or limit how many can coexist.
-    const candidate = priorityCandidates.find((exercise) => !context || isExerciseAvailable(exercise, context))
+    const candidate = priorityCandidates.sort((a, b) => compareCoachingPreference(a.id, b.id, preferences, coachingPreferences)).find((exercise) => !context || isExerciseAvailable(exercise, context))
     const desiredFrequency = priorityProfile.desiredFrequency(priority, PLAN_FREQUENCY_OPPORTUNITIES)
     const addReason = priorityAddReason(muscle, desiredFrequency)
     const existing = planExercises.find(({ exercise, planned }) => exercise.primaryMuscles.some((item) => item.toLowerCase() === normalizedPriority) && planned.setType === 'working' && planned.sets < exercise.defaultSets)

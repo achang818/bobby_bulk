@@ -1,3 +1,4 @@
+import type { CoachingPreferenceState } from './coaching-preferences'
 import { buildTrace } from './rules'
 import { isExerciseAvailable } from './equipment'
 import { findExerciseReplacement, replacementReasonDescription } from './exercise-replacement'
@@ -16,7 +17,7 @@ export function findContextualSubstitute(exercise: Exercise, exercises: Exercise
 }
 
 /** Context-specific adapter over the reusable exercise-intelligence pipeline. */
-export function findContextualCandidates(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set()): ExerciseCandidate[] {
+export function findContextualCandidates(exercise: Exercise, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, excludedExerciseIds: Set<string> = new Set(), coachingPreferences?: CoachingPreferenceState): ExerciseCandidate[] {
   if (isExerciseAvailable(exercise, todaysContext)) return []
   return findExerciseReplacement({
     originalExercise: exercise,
@@ -31,10 +32,11 @@ export function findContextualCandidates(exercise: Exercise, exercises: Exercise
       requireSameCategory: true,
     },
     preferences,
+    coachingPreferences,
   }).rankedCandidates
 }
 
-export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId): ExerciseRecommendationCandidate[] {
+export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysContext: TodaysContext, preferences: UserPreferences, defaultGymId = preferences.defaultGymId, coachingPreferences?: CoachingPreferenceState): ExerciseRecommendationCandidate[] {
   const traveling = defaultGymId !== undefined && todaysContext.gymId !== defaultGymId
   const limit = traveling || todaysContext.availableEquipment !== undefined ? Number.POSITIVE_INFINITY : MAX_CONTEXTUAL_SUBSTITUTIONS
   let substitutions = 0
@@ -47,7 +49,7 @@ export function adaptWorkout(plan: WorkoutPlan, exercises: Exercise[], todaysCon
     if (substitutions >= limit) return []
     const exercise = exercises.find((item) => item.id === exerciseId)
     if (!exercise || isExerciseAvailable(exercise, todaysContext)) return []
-    const alternative = findContextualCandidates(exercise, exercises, todaysContext, preferences, selectedSubstituteIds)[0]
+    const alternative = findContextualCandidates(exercise, exercises, todaysContext, preferences, selectedSubstituteIds, coachingPreferences)[0]
     if (!alternative) return todaysContext.availableEquipment === undefined ? [] : [{
       id: `context-remove-${plan.id}-${exercise.id}`, type: 'REMOVE', exerciseId: exercise.id,
       score: 6, reasons: [`${exercise.name} needs equipment unavailable at this gym today. No suitable replacement is available, so omit it for this session. Your saved plan stays unchanged.`], trace,

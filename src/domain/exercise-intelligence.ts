@@ -1,3 +1,4 @@
+import { behavioralStateBias } from './coaching-preferences'
 import { isExerciseAvailable } from './equipment'
 import { sameMuscle } from './muscle-priorities'
 import { classifyPreference } from './states'
@@ -73,8 +74,9 @@ export function evaluateExerciseCandidate(request: Omit<ExerciseCandidateRequest
     goalMatch,
     ...(priorityMuscleRank === undefined ? {} : { priorityMuscleRank }),
     preference,
+    behavioralEvidence: request.coachingPreferences?.exercises.find((item) => item.exerciseId === candidate.id),
     preferenceAdjustment: preference === 'preferred' ? 'boost' : preference === 'recommend-less' ? 'penalty' : preference === 'excluded' ? 'excluded' : 'none',
-    reasons: candidateReasons(similarity, roleMatch, preference, goalMatch),
+    reasons: [...candidateReasons(similarity, roleMatch, preference, goalMatch), ...(request.coachingPreferences?.exercises.find((item) => item.exerciseId === candidate.id)?.reasons ?? [])],
   }
 }
 
@@ -139,6 +141,7 @@ function compareCandidates(left: ExerciseCandidate, right: ExerciseCandidate) {
     || right.similarity.directPrimaryMuscleOverlap.length - left.similarity.directPrimaryMuscleOverlap.length
     || compareBoolean(right.goalMatch, left.goalMatch)
     || preferenceRank(right.preference) - preferenceRank(left.preference)
+    || behavioralStateBias(right.behavioralEvidence?.state) - behavioralStateBias(left.behavioralEvidence?.state)
     || left.exercise.name.localeCompare(right.exercise.name)
     || left.exercise.id.localeCompare(right.exercise.id)
 }
