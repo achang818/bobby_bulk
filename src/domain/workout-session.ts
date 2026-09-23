@@ -147,7 +147,7 @@ export function createWorkoutSessionForToday(plan: WorkoutTemplate, recommendati
 
 /** Logging can include extra movements while the starting prescription stays intact. */
 export function sessionExercises(session: WorkoutSession): PlannedExercise[] {
-  return [...(session.plannedExercises ?? []), ...(session.addedExercises ?? [])]
+  return (session.exerciseSwaps ?? []).reduce((slots, swap) => slots.map((slot) => slot.exerciseId === swap.fromExerciseId ? swap.to : slot), [...(session.plannedExercises ?? []), ...(session.addedExercises ?? [])])
 }
 
 /** Actual session choices take precedence; an unknown target leaves the input empty. */
@@ -181,6 +181,7 @@ export function normalizeWorkoutSession(value: unknown): WorkoutSession {
     ...(raw.gym ? { gym: structuredClone(raw.gym) } : {}),
     ...(raw.context ? { context: structuredClone(raw.context) } : {}),
     ...(Array.isArray(raw.adaptationNotes) ? { adaptationNotes: raw.adaptationNotes.filter((note) => typeof note === 'string') } : {}),
+    ...(Array.isArray(raw.exerciseSwaps) ? { exerciseSwaps: structuredClone(raw.exerciseSwaps.filter((swap) => swap?.fromExerciseId && swap.to?.exerciseId)) } : {}),
     ...(Array.isArray(raw.exerciseOmissions) ? { exerciseOmissions: raw.exerciseOmissions.filter((item) => item && typeof item.exerciseId === 'string' && ['voluntary', 'time', 'equipment'].includes(item.reason)).map((item) => ({ ...item })) } : {}),
     ...(Array.isArray(raw.prescriptionChanges) ? { prescriptionChanges: structuredClone(raw.prescriptionChanges) } : {}),
     planningAuthority: raw.planningAuthority ?? 'user-plan',

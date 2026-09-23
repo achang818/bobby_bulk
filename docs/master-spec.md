@@ -2113,3 +2113,23 @@ in plain language; internal state labels and scoring details remain inspectable
 in domain traces rather than being presented as coaching prose. No new major
 coaching subsystem, scheduling, periodization, deloads, LLM, dashboard, benchmark
 scheduler or backend migration is introduced.
+
+
+### Comfortable logging and explicit session edits
+
+Start empty workout creates zero prescribed, added or logged exercises. Adding a
+movement is an explicit logger action. Logger and library movements use accessible
+expand/collapse dropdown sections. Switch exercise presents up to three ranked,
+equipment-compatible alternatives plus searchable manual choices.
+
+Explicit in-session substitutions are stored in exerciseSwaps and user-substitution
+provenance. The initial prescription and already logged sets retain their original
+exercise identities; the logger uses the resulting movement for remaining sets.
+A switch never edits a saved plan or creates inferred skip/dislike evidence.
+Changes survive pause/resume. Cancellation discards only the active draft, with an
+inline confirmation when sets exist, and never saves a completed workout.
+
+The session calendar date is editable in both the active logger and History.
+Only valid dates through the current coaching date are accepted. History date
+changes use the normal save path and rederive exposure, recovery and outcomes;
+precise original event timestamps and frozen prescription provenance are retained.

@@ -53,7 +53,7 @@ export function TodayDashboard({ asOf, plan, reasons, sessionNote, workouts, pre
                         <h2>{plan.focus.replaceAll("Â·", "·") || "Balanced training"}</h2>
                         <p>{inProgress ? "Pick up where you left off. Your logged sets are saved." : "Shaped by your goals, recent training, and available equipment."}</p>
                         <div className="session-metrics"><span><strong>{planned.length}</strong> exercises</span><span><strong>{totalSets}</strong> planned sets</span>{inProgress && <span><strong>{loggedSets}</strong> logged</span>}</div>
-                        <div className="session-hero-actions"><button className="primary-button" disabled={!planned.length} onClick={onStart}>{startLabel}<span aria-hidden="true"> →</span></button><button className="hero-secondary" onClick={onPlans}>Browse my plans</button></div>
+                        <div className="session-hero-actions"><button className="primary-button" disabled={!inProgress && !planned.length} onClick={onStart}>{startLabel}<span aria-hidden="true"> →</span></button><button className="hero-secondary" onClick={onPlans}>Browse my plans</button></div>
                     </div>
                     <div className="session-body"><div className="section-heading"><h2>The workout</h2><span className="muted">Working sets</span></div>
                         {!inProgress && <div className="exercise-choice-status"><p role="status">{exerciseChoiceMessage}</p>{hasExerciseChoices && <button className="text-button" onClick={onResetExerciseChoices}>Reset exercise choices</button>}</div>}

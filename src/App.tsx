@@ -1,3 +1,7 @@
+import { ExercisePicker } from './components/ExercisePicker'
+import { addSessionExercise, switchSessionExercise, validSessionDate } from './domain/session-editing'
+import { findExerciseCandidates } from './domain/exercise-intelligence'
+import { deriveCoachingPreferences } from './domain/coaching-preferences'
 import { currentCoachingDate } from './domain/coaching-date'
 import { useEffect, useMemo, useRef, useState } from "react";
 import "./App.css";
@@ -36,8 +40,9 @@ function App() {
     const [completedWorkoutId, setCompletedWorkoutId] = useState<string>();
     const [startNotice, setStartNotice] = useState('');
     const [workouts, setWorkouts] = useState<Workout[]>(() => loadWorkouts());
-    const [selectedExerciseId, setSelectedExerciseId] = useState(() => loadActiveWorkoutSession()?.plannedExercises?.[0]?.exerciseId ?? exercises[0].id);
-    const [exerciseSearch, setExerciseSearch] = useState("");
+    const [selectedExerciseId, setSelectedExerciseId] = useState(() => (loadActiveWorkoutSession() ? sessionExercises(loadActiveWorkoutSession()!)[0]?.exerciseId : undefined) ?? "");
+    const [picker, setPicker] = useState<{ mode: 'add' | 'switch'; fromId?: string }>();
+    const [confirmCancel, setConfirmCancel] = useState(false);
     const [activeSession, setActiveSession] = useState<WorkoutSession | null>(() => loadActiveWorkoutSession());
     const [setInputOverrides, setSetInputOverrides] = useState<Record<string, SetInput>>({});
     const [showLogger, setShowLogger] = useState(() => Boolean(loadActiveWorkoutSession()));
@@ -68,7 +73,7 @@ function App() {
             setTodaysContext(loadTodaysContext({ gymId: restoredPreferences.defaultGymId ?? defaultGym.id, unavailableEquipment: [] }));
             setRecommendationDecisions(loadRecommendationDecisions());
             setActiveSession(restoredActiveSession);
-            if (restoredActiveSession?.plannedExercises?.[0]) setSelectedExerciseId(restoredActiveSession.plannedExercises[0].exerciseId);
+            setSelectedExerciseId(restoredActiveSession ? sessionExercises(restoredActiveSession)[0]?.exerciseId ?? "" : "");
             setShowLogger(Boolean(restoredActiveSession));
         }).catch(() => {
             // The JSON endpoint exists only during local development; browser storage remains usable without it.
@@ -154,7 +159,7 @@ function App() {
         return result;
     }, [basePreview, recommendedInput, exerciseChoices]);
     const recommendedPreview = previewChanges.recommendation;
-    const previewPlan = activeSession ? { ...activePlan, name: activeSession.title, focus: activeSession.title, plannedExercises: activeSession.plannedExercises } : recommendedPreview.workout;
+    const previewPlan = activeSession ? { ...activePlan, name: activeSession.title, focus: activeSession.title, plannedExercises: sessionExercises(activeSession) } : recommendedPreview.workout;
     const activePlanExerciseIds = planExerciseIds(activePlan);
     const currentSplit = useMemo<Split | undefined>(() => plans.length ? { id: "current-plan-collection", name: "Current plans", workoutIds: plans.map((plan) => plan.id) } : undefined, [plans]);
     const planRecommendations = useMemo(() => generateRecommendations({ plan: activePlan, exercises, history: workouts, trainingState, preferences, todaysContext: coachingContext, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: activePlan.planningAuthority ?? "user-plan" }), [activePlan, currentSplit, plans, preferences, recommendationDecisions, coachingContext, workouts, trainingState]);
@@ -178,17 +183,21 @@ function App() {
         return { weight: savedInput ?? String(suggestedLoad ?? latestSet?.weight ?? 0), reps: String(Math.min(repRange.max, Math.max(repRange.min, latestSet?.reps ?? repRange.min))), rir: "", rpe: "", };
     }, [activeSession, activePlan.id, planRecommendations, preferences.weightUnit, sessionUnit, recommendationDecisions, selectedExerciseId, workouts]);
     const setInput = setInputOverrides[selectedExerciseId] ?? initialSetInput;
-    const selectableExercises = exercises.filter((exercise) => exercise.name.toLowerCase().includes(exerciseSearch.trim().toLowerCase()));
+    const pickerChoices = exercises.filter((exercise) => !workoutExerciseIds.includes(exercise.id) && (picker?.mode !== 'add' || ![...(activeSession?.plannedExercises ?? []), ...(activeSession?.addedExercises ?? [])].some((slot) => slot.exerciseId === exercise.id)));
+    const pickerOriginal = exercises.find((exercise) => exercise.id === picker?.fromId);
+    const alternatives = pickerOriginal ? findExerciseCandidates({ exercise: pickerOriginal, exercises, preferences, goals: preferences.goals, constraints: { ...(activeSession?.context ?? gymContext), excludedExerciseIds: workoutExerciseIds, requireSameCategory: true }, coachingPreferences: deriveCoachingPreferences(trainingState, recommendationDecisions) }).slice(0, 3) : [];
+    function chooseExercise(exercise: typeof exercises[number]) {
+        const replacementState = activeSession ? deriveTrainingState(exercises, workouts, activeSession.date, sessionUnit) : undefined;
+        setActiveSession((current) => current ? picker?.mode === 'switch' && picker.fromId ? switchSessionExercise(current, picker.fromId, exercise, replacementState, recommendationDecisions) : addSessionExercise(current, exercise) : current);
+        setSelectedExerciseId(exercise.id);
+        setPicker(undefined);
+        window.setTimeout(() => loggerRef.current?.querySelector<HTMLElement>(".logger-exercise.active .logger-exercise-heading")?.focus(), 0);
+    }
+    function cancelWorkout() {
+        clearActiveWorkoutSession(); setActiveSession(null); setShowLogger(false); setConfirmCancel(false); setPicker(undefined); setSetInputOverrides({});
+    }
     function updateSetInput(next: Partial<SetInput>) {
         setSetInputOverrides((current) => ({ ...current, [selectedExerciseId]: { ...(current[selectedExerciseId] ?? initialSetInput), ...next }, }));
-    }
-    function selectLoggerExercise(nextId: string) {
-        setSelectedExerciseId(nextId);
-        setExerciseSearch("");
-        setActiveSession((current) => {
-            if (!current || sessionExercises(current).some((exercise) => exercise.exerciseId === nextId)) return current;
-            return { ...current, addedExercises: [...(current.addedExercises ?? []), createPlannedExercise(nextId, sessionExercises(current).length, exercises.find((exercise) => exercise.id === nextId))] };
-        });
     }
     function updateTodaysContext(next: TodaysContext) {
         freezeActiveGym();
@@ -215,6 +224,7 @@ function App() {
         });
     }
     function addSet() {
+        if (!activeSession || !workoutExerciseIds.includes(selectedExerciseId)) return;
         const parsedWeight = Number(setInput.weight);
         const parsedReps = Number(setInput.reps);
         const parsedRir = setInput.rir.trim() === "" ? undefined : Number(setInput.rir);
@@ -244,28 +254,29 @@ function App() {
     }
     function startPlan(plan: WorkoutTemplate) {
         if (activeSession) {
-            setSelectedExerciseId(activeSession.plannedExercises?.find((planned) => !activeSession.sets.filter((set) => set.exerciseId === planned.exerciseId).length)?.exerciseId ?? activeSession.plannedExercises?.[0]?.exerciseId ?? exercises[0].id);
+            setSelectedExerciseId(sessionExercises(activeSession).find((planned) => !activeSession.sets.filter((set) => set.exerciseId === planned.exerciseId).length)?.exerciseId ?? sessionExercises(activeSession)[0]?.exerciseId ?? "");
             setShowLogger(true);
             return;
         }
         const generatedRecommendations = generateRecommendations({ plan, exercises, history: workouts, trainingState, preferences, todaysContext: gymContext, decisions: recommendationDecisions, split: currentSplit, splitWorkouts: plans, authority: "user-plan" });
-        const session = captureSessionGym(createWorkoutSessionForToday(plan, generatedRecommendations, exercises, preferences.weightUnit, recommendationDecisions), currentGym, gymContext);
+        const session = captureSessionGym(plan.id === "empty-workout" ? createWorkoutSession(plan, [], preferences.weightUnit) : createWorkoutSessionForToday(plan, generatedRecommendations, exercises, preferences.weightUnit, recommendationDecisions), currentGym, gymContext);
         session.adaptationNotes = generatedRecommendations.filter((recommendation) => recommendation.trace.ruleId === "adapt-unavailable-equipment").map((recommendation) => recommendation.reason);
         if (!session.plannedExercises?.length && plan.id !== "empty-workout") { setStartNotice(`No exercises from ${plan.name} fit today's gym and time settings. Adjust those settings before starting. Your saved plan is unchanged.`); return; }
         setStartNotice('');
-        if (!session.plannedExercises?.length && plan.id === "empty-workout") session.addedExercises = [createPlannedExercise(exercises[0].id, 0, exercises[0])];
+        setPicker(undefined); setConfirmCancel(false);
         setActivePlan(plan);
-        setSelectedExerciseId(sessionExercises(session)[0]?.exerciseId ?? exercises[0].id);
+        setSelectedExerciseId(sessionExercises(session)[0]?.exerciseId ?? "");
         setSetInputOverrides({});
         setActiveSession(session);
         setShowLogger(true);
     }
     function startRecommendedWorkout() {
         if (activeSession) {
-            setSelectedExerciseId(activeSession.plannedExercises?.find((planned) => !activeSession.sets.filter((set) => set.exerciseId === planned.exerciseId).length)?.exerciseId ?? activeSession.plannedExercises?.[0]?.exerciseId ?? exercises[0].id);
+            setSelectedExerciseId(sessionExercises(activeSession).find((planned) => !activeSession.sets.filter((set) => set.exerciseId === planned.exerciseId).length)?.exerciseId ?? sessionExercises(activeSession)[0]?.exerciseId ?? "");
             setShowLogger(true);
             return;
         }
+        setPicker(undefined); setConfirmCancel(false);
         const recommended = recommendedPreview;
         const recommendedExercises = recommended.workout.plannedExercises ?? [];
         setActivePlan(recommended.workout);
@@ -308,28 +319,27 @@ function App() {
                 setView("today");
             }}/>)}      </main>      {showLogger && (<div className="modal-backdrop" role="presentation" onMouseDown={(event) => event.target === event.currentTarget && setShowLogger(false)}>          <section className="modal" role="dialog" aria-modal="true" ref={loggerRef} tabIndex={-1} aria-labelledby="logger-title">            <div className="modal-heading">              <div>                <p className="eyebrow">{activeSession?.title ?? activePlan.name}</p>                <h2 id="logger-title">Log workout</h2>              </div>              <button className="close-button" onClick={() => setShowLogger(false)} aria-label="Close logger">                ×              </button>            </div>            {activeSession?.gym && <p className="brief-note">Training at {activeSession.gym.name}. Gym changes apply to your next workout.</p>}
             {Boolean(activeSession?.adaptationNotes?.length) && <details className="session-explanation"><summary>Adjusted for this gym</summary><ul>{activeSession?.adaptationNotes?.map((note, index) => <li key={index}>{note}</li>)}</ul></details>}
+            {activeSession && <label className="session-date">Workout date<input aria-label="Workout date" type="date" max={previewDate} value={activeSession.date} onChange={(event) => { const date = event.target.value; if (validSessionDate(date, previewDate)) setActiveSession((current) => current ? { ...current, date } : current); }} /></label>}
+            <div className="logger-toolbar"><button type="button" className="secondary-button" onClick={() => setPicker({ mode: 'add' })}>+ Add exercise</button><small>{workoutExerciseIds.length} {workoutExerciseIds.length === 1 ? "movement" : "movements"}</small></div>
+            {picker?.mode === 'add' && <ExercisePicker key={`${picker.mode}-${picker.fromId ?? ''}`} mode={picker.mode} choices={pickerChoices} alternatives={alternatives} onPick={chooseExercise} onClose={() => setPicker(undefined)} />}
+            {!workoutExerciseIds.length && <div className="logger-empty"><h3>Your workout, your way</h3><p>Add your first exercise when you're ready.</p></div>}
             <div className="logger-progress"><div><strong>{sessionSets.length} {sessionSets.length === 1 ? "set" : "sets"} logged</strong><span>{Array.from(loggerSetTargets.values()).reduce((total, count) => total + count, 0)} planned</span></div><progress aria-label="Workout sets completed" value={sessionSets.length} max={Math.max(1, Array.from(loggerSetTargets.values()).reduce((total, count) => total + count, 0))}/></div>            <div className="logger-exercises">              {workoutExerciseIds.map((id, index) => {
                 const exercise = exercises.find((item) => item.id === id);
                 const loggedSets = sessionSets.filter((set) => set.exerciseId === id);
                 const plannedExercise = activeSession ? sessionExercises(activeSession).find((item) => item.exerciseId === id) : undefined;
                 if (!exercise)
                     return null;
-                return (<article className={selectedExerciseId === id ? "logger-exercise active" : "logger-exercise"} key={id}>
-                    <button className="logger-exercise-heading" onClick={() => setSelectedExerciseId(id)}>
+                return (<article className={selectedExerciseId === id ? "logger-exercise active" : "logger-exercise"} key={index}>
+                    <button type="button" className="logger-exercise-heading" aria-expanded={selectedExerciseId === id} aria-controls={`logger-content-${id}`} onClick={() => { setSelectedExerciseId((current) => current === id ? "" : id); setPicker(undefined); }}>
                         <span className="logger-exercise-number">{String(index + 1).padStart(2, "0")}</span>
                         <span><strong>{exercise.name}</strong><small>{loggedSets.length}/{loggerSetTargets.get(id) ?? exercise.defaultSets} planned {plannedExercise?.setType ?? "working"} sets</small></span>
                         <span className="logger-exercise-state">{loggedSets.length === (loggerSetTargets.get(id) ?? exercise.defaultSets) ? "✓" : ""}</span>
                     </button>
-                    {selectedExerciseId === id && <div className="logger-set-entry">
-                        <LoadTarget recommendation={plannedExercise?.loadRecommendation} />
-                        {activeSession?.plannedExercises?.some((slot) => slot.exerciseId === id && slot.setType === 'working') && !loggedSets.some((set) => set.setType === 'working') && <label>Skipping this movement? (optional)<select aria-label={`Skip reason for ${exercise.name}`} value={activeSession.exerciseOmissions?.find((item) => item.exerciseId === id)?.reason ?? ''} onChange={(event) => { const reason = event.target.value as 'voluntary' | 'time' | 'equipment' | ''; setActiveSession((current) => current ? { ...current, exerciseOmissions: [...(current.exerciseOmissions ?? []).filter((item) => item.exerciseId !== id), ...(reason ? [{ exerciseId: id, reason }] : [])] } : current) }}><option value="">No reason recorded</option><option value="voluntary">I choose not to do this movement</option><option value="time">Not enough time</option><option value="equipment">Equipment unavailable</option></select></label>}
-                        <details className="logger-exercise-picker"><summary>Switch or add an exercise</summary>
-                            <div className="logger-picker-heading"><strong>Switch exercise</strong><small>Add any movement for this session only.</small></div>
-                            <label>Search movements<input type="search" value={exerciseSearch} onChange={(event) => setExerciseSearch(event.target.value)} placeholder="e.g. lat pulldown" /></label>
-                            <label>Selected exercise<select value={selectedExerciseId} onChange={(event) => selectLoggerExercise(event.target.value)}>
-                                {selectableExercises.map((option) => <option key={option.id} value={option.id}>{option.name}</option>)}
-                            </select></label>
-                        </details>
+                    {selectedExerciseId === id && <div id={`logger-content-${id}`} className="logger-set-entry">
+                        <LoadTarget recommendation={plannedExercise?.loadRecommendation ?? (activeSession?.exerciseSwaps?.some((swap) => swap.to.exerciseId === id) ? { kind: 'choose-load', unit: sessionUnit, reason: 'Choose a manageable starting load for this replacement and its rep range.' } : undefined)} />
+                        {activeSession && plannedExercise?.setType === 'working' && !loggedSets.some((set) => set.setType === 'working') && <label>Skipping this movement? (optional)<select aria-label={`Skip reason for ${exercise.name}`} value={activeSession.exerciseOmissions?.find((item) => item.exerciseId === id)?.reason ?? ''} onChange={(event) => { const reason = event.target.value as 'voluntary' | 'time' | 'equipment' | ''; setActiveSession((current) => current ? { ...current, exerciseOmissions: [...(current.exerciseOmissions ?? []).filter((item) => item.exerciseId !== id), ...(reason ? [{ exerciseId: id, reason }] : [])] } : current) }}><option value="">No reason recorded</option><option value="voluntary">I choose not to do this movement</option><option value="time">Not enough time</option><option value="equipment">Equipment unavailable</option></select></label>}
+                        <button type="button" className="text-button switch-exercise" onClick={() => setPicker({ mode: 'switch', fromId: id })}>Switch exercise &rarr;</button>
+                        {picker?.mode === 'switch' && picker.fromId === id && <ExercisePicker key={id} mode="switch" choices={pickerChoices} alternatives={alternatives} onPick={chooseExercise} onClose={() => { setPicker(undefined); window.setTimeout(() => loggerRef.current?.querySelector<HTMLElement>(".logger-exercise.active .switch-exercise")?.focus(), 0); }} />}
                         {loggedSets.map((set, setIndex) => <div className="logged-set" key={set.id}><span>Set {setIndex + 1}</span><strong>{set.weight} {sessionUnit} × {set.reps}</strong><span>RIR {set.rir ?? "-"} · RPE {set.rpe ?? "-"}</span></div>)}
                         <div className="input-row effort-input-row">
                             <label>Weight ({sessionUnit})<input inputMode="decimal" placeholder="Choose weight" value={setInput.weight} onChange={(event) => updateSetInput({ weight: event.target.value })}/></label>
@@ -341,10 +351,8 @@ function App() {
                         {loggedSets.length >= (loggerSetTargets.get(id) ?? exercise.defaultSets) && <p className="extra-set-note">The recommendation is complete. Extra sets are recorded and included in your history.</p>}
                     </div>}
                 </article>);
-            })}            </div>            <div className="logger-legacy-controls">              <label>                Exercise                <select value={selectedExerciseId} onChange={(event) => setSelectedExerciseId(event.target.value)}>                {(workoutExerciseIds.length ? workoutExerciseIds : exercises.map((exercise) => exercise.id)).map((id) => {
-                const exercise = exercises.find((item) => item.id === id);
-                return exercise ? (<option key={exercise.id} value={exercise.id}>                      {exercise.name}                    </option>) : null;
-            })}              </select>            </label>            </div>            <div className="draft-list">              {sessionSets.length === 0 ? (<p className="empty-state">                  Log sets as you move through the plan.                </p>) : (sessionSets.map((set) => (<div className="draft-set" key={set.id}>                    <span>                      {exercises.find((exercise) => exercise.id === set.exerciseId)?.name}{" "}                      · Set {sessionSets.filter((item) => item.exerciseId === set.exerciseId).findIndex((item) => item.id === set.id) + 1}                    </span>                    <strong>                      {set.weight} {sessionUnit} × {set.reps}                    </strong>                    <button onClick={() => updateSessionSets((current) => current.filter((item) => item.id !== set.id))}>                      Remove                    </button>                  </div>)))}            </div>            <button className="primary-button full" disabled={sessionSets.length === 0} onClick={finishWorkout}>              Finish workout            </button>            <p className="timing-note">              Your sets are saved as you go. Close this window to pause and resume later.            </p>          </section>        </div>)}    </div>);
+            })}            </div>            <div className="draft-list">              {sessionSets.length === 0 ? (<p className="empty-state">                  Log sets as you move through the plan.                </p>) : (sessionSets.map((set) => (<div className="draft-set" key={set.id}>                    <span>                      {exercises.find((exercise) => exercise.id === set.exerciseId)?.name}{" "}                      · Set {sessionSets.filter((item) => item.exerciseId === set.exerciseId).findIndex((item) => item.id === set.id) + 1}                    </span>                    <strong>                      {set.weight} {sessionUnit} × {set.reps}                    </strong>                    <button onClick={() => updateSessionSets((current) => current.filter((item) => item.id !== set.id))}>                      Remove                    </button>                  </div>)))}            </div>            <button className="primary-button full" disabled={sessionSets.length === 0} onClick={finishWorkout}>              Finish workout            </button>            {confirmCancel ? <div className="cancel-confirmation" role="alert"><strong>Discard this workout?</strong><p>Your {sessionSets.length} logged sets will be discarded.</p><button type="button" className="secondary-button" onClick={() => setConfirmCancel(false)}>Keep logging</button><button type="button" className="danger-button" onClick={cancelWorkout}>Discard workout</button></div> : <button type="button" className="text-button cancel-workout" onClick={() => sessionSets.length ? setConfirmCancel(true) : cancelWorkout()}>Cancel workout</button>}
+            <p className="timing-note">              Your sets are saved as you go. Close this window to pause and resume later.            </p>          </section>        </div>)}    </div>);
 }
 function RecommendationRow({ recommendation, unit = "lb", decision, onDecision, }: {
     recommendation: Recommendation;
@@ -450,6 +458,7 @@ function HistoryView({ trainingState, workouts, unit, onUpdate, onDelete, initia
 }) {
         const [selectedWorkoutId, setSelectedWorkoutId] = useState<string | null>(initialWorkoutId ?? null);
         const [editingSets, setEditingSets] = useState<LoggedSet[]>(() => workouts.find((workout) => workout.id === initialWorkoutId)?.sets.map((set) => ({ ...set })) ?? []);
+        const [editingDate, setEditingDate] = useState(() => workouts.find((workout) => workout.id === initialWorkoutId)?.date ?? "");
         const [newExerciseId, setNewExerciseId] = useState(exercises[0].id);
         const [newWeight, setNewWeight] = useState("");
         const [newReps, setNewReps] = useState("");
@@ -461,11 +470,12 @@ function HistoryView({ trainingState, workouts, unit, onUpdate, onDelete, initia
         const plannedComparison = selectedWorkout ? comparePlannedVsActual(selectedWorkout) : [];
         function selectWorkout(workout: Workout) {
                 setSelectedWorkoutId(workout.id);
+                setEditingDate(workout.date);
                 setEditingSets(workout.sets.map((set) => ({ ...set })));
         }
         function saveEdits() {
-                if (!selectedWorkout) return;
-            const updated = { ...selectedWorkout, sets: editingSets };
+                if (!selectedWorkout || !validSessionDate(editingDate, trainingState.asOf)) return;
+            const updated = { ...selectedWorkout, date: editingDate, sets: editingSets };
             if (onUpdate) onUpdate(updated);
             else {
                 updateWorkout(updated);
@@ -506,6 +516,7 @@ function HistoryView({ trainingState, workouts, unit, onUpdate, onDelete, initia
                 <aside className="progression-detail history-detail">
                     {selectedWorkout ? <>
                         <div className="section-heading"><div><p className="eyebrow">{formatDate(selectedWorkout.date)}</p><h2>{selectedWorkout.title}</h2></div><span className="muted">{editingSets.length} sets</span></div>
+                        <label className="session-date">Session date<input aria-label="Session date" type="date" max={trainingState.asOf} value={editingDate} onChange={(event) => setEditingDate(event.target.value)} /></label>
                         {plannedComparison.length > 0 && <div className="history-plan-comparison">{plannedComparison.map((item) => <span key={item.exerciseId}>{exercises.find((exercise) => exercise.id === item.exerciseId)?.name}: {item.completedWorkingSets}{item.plannedSets === undefined ? " working sets · additional movement" : `/${item.plannedSets} working sets`}{item.demonstratedWorkingLoad === undefined ? "" : ` · demonstrated load ${displayWeight(item.demonstratedWorkingLoad, selectedWorkout.unit, unit)} ${unit}`}</span>)}</div>}
                         <div className="history-set-list">{editingSets.map((set, index) => <div className="history-set-row" key={set.id}><span>{exercises.find((exercise) => exercise.id === set.exerciseId)?.name ?? set.exerciseId}<small>Set {index + 1} · {set.setType}</small></span><input aria-label="Weight" type="number" readOnly={Boolean(set.loadType && set.loadType !== "external")} value={displayedWeight(set, selectedWorkout)} onChange={(event) => setEditingSets((current) => current.map((item) => item.id === set.id ? { ...item, weight: convertWeight(Number(event.target.value), unit, selectedWorkout.unit ?? unit) } : item))} /><input aria-label="Reps" type="number" value={set.reps} onChange={(event) => setEditingSets((current) => current.map((item) => item.id === set.id ? { ...item, reps: Number(event.target.value) } : item))} /><span>{unit}</span></div>)}</div>
                         <div className="history-add-set">
@@ -516,7 +527,7 @@ function HistoryView({ trainingState, workouts, unit, onUpdate, onDelete, initia
                             <input aria-label="New set reps" type="number" min="1" value={newReps} onChange={(event) => setNewReps(event.target.value)} placeholder="Reps" />
                             <button className="secondary-button" onClick={addSet}>Add set</button>
                         </div>
-                        <button className="primary-button full" onClick={saveEdits}>Save changes</button>
+                        <button className="primary-button full" disabled={!validSessionDate(editingDate, trainingState.asOf)} onClick={saveEdits}>Save changes</button>
                     </> : <p className="empty-state">Select a workout to see every set and edit the logged weight or reps.</p>}
                 </aside>
             </div>
@@ -536,10 +547,10 @@ function ExercisesView({ trainingState }: { trainingState: TrainingState }) {
         <div className="exercise-library">{visible.map((exercise) => {
             const expanded = expandedId === exercise.id;
             const features = exerciseTrainingState(trainingState, exercise.id);
-            return <article className={expanded ? "library-card expanded" : "library-card"} key={exercise.id}>
-                <button className="exercise-row-trigger" onClick={() => setExpandedId(expanded ? null : exercise.id)} aria-expanded={expanded}><span className="library-icon">{exercise.type === "compound" ? "◎" : "◒"}</span><span className="library-copy"><span className="card-kicker">{exercise.type} · {exercise.category}</span><strong>{exercise.name}</strong><small>{exercise.equipment}</small></span><span className="expand-mark">{expanded ? "−" : "+"}</span></button>
+            return <details open={expanded} className={expanded ? "library-card expanded" : "library-card"} key={exercise.id}>
+                <summary className="exercise-row-trigger" onClick={(event) => { event.preventDefault(); setExpandedId(expanded ? null : exercise.id); }} aria-expanded={expanded}><span className="library-icon">{exercise.type === "compound" ? "◎" : "◒"}</span><span className="library-copy"><span className="card-kicker">{exercise.type} · {exercise.category}</span><strong>{exercise.name}</strong><small>{exercise.equipment}</small></span><span className="expand-mark">{expanded ? "−" : "+"}</span></summary>
                 {expanded && <div className="exercise-details"><div><span className="detail-label">Primary muscles</span><div className="tag-list">{exercise.primaryMuscles.map((muscle) => <span key={muscle}>{muscle}</span>)}</div></div><div className="detail-grid"><div><span className="detail-label">Goals</span><strong>{exercise.goals.join(" · ")}</strong></div><div><span className="detail-label">Working range</span><strong>{exercise.defaultSets} sets · {exercise.repRange.min}–{exercise.repRange.max} reps</strong></div><div><span className="detail-label">Equipment</span><strong>{exercise.equipment}</strong></div><div><span className="detail-label">Pattern</span><strong>{exercise.category}</strong></div></div><ExerciseHistoryEvidence features={features} unit={trainingState.unit} /></div>}
-            </article>;
+            </details>;
         })}{visible.length === 0 && <div className="no-results"><strong>No movements found</strong><span>Try a different name, muscle, or equipment.</span></div>}</div>
     </>;
 }

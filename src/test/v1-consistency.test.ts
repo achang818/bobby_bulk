@@ -80,7 +80,7 @@ describe('v1 date, exposure and unit invariants', () => {
     const input = { plan, exercises, history: records, preferences: prefs, todaysContext: context, asOf }
     const rec = generateRecommendationsWithTrace(input).recommendations.find((item) => item.type === 'REPLACE')!
     expect(rec).toBeDefined()
-    const choices = saveRecommendationDecision(rec, 'rejected', { planId: plan.id, unit: 'lb' }).map((item) => ({ ...item, timestamp: '2026-09-18T12:00:00Z' }))
+    const choices = saveRecommendationDecision(rec, 'rejected', { planId: plan.id, unit: 'lb', coachingDate: asOf }).map((item) => ({ ...item, timestamp: '2026-09-18T12:00:00Z' }))
     const result = generateRecommendationsWithTrace({ ...input, preferences: { ...prefs, weightUnit: 'kg' }, decisions: choices })
     expect(result.suppressed.some((item) => item.code === 'recently-declined')).toBe(true)
     for (const suppressed of result.suppressed) expect(result.recommendations.some((item) => item.id === suppressed.candidateId)).toBe(false)

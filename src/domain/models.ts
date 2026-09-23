@@ -163,6 +163,8 @@ export interface WorkoutSession {
   plannedExercises?: PlannedExercise[]
   /** Movements added during logging; they do not rewrite the original prescription. */
   addedExercises?: PlannedExercise[]
+  /** Explicit logger substitutions; the starting prescription remains intact. */
+  exerciseSwaps?: { fromExerciseId: string; to: PlannedExercise }[]
   sets: LoggedSet[]
 }
 
@@ -479,7 +481,7 @@ export interface RecommendationDecision {
 
 export interface SessionPrescriptionChange {
   id: string
-  source: 'accepted-recommendation' | 'selected-recommendation' | 'rejected-recommendation' | 'dismissed-recommendation' | 'equipment' | 'time' | 'generated-substitution'
+  source: 'accepted-recommendation' | 'selected-recommendation' | 'rejected-recommendation' | 'dismissed-recommendation' | 'equipment' | 'time' | 'generated-substitution' | 'user-substitution'
   recommendation?: Recommendation
   decision?: RecommendationDecision
   unit: WeightUnit

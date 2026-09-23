@@ -69,7 +69,7 @@ export function deriveCoachingPreferences(state: TrainingState, decisions: Recom
     for (const exercise of outcome.exercises) {
       if (exercise.prescription?.setType !== 'working') continue
       if (exercise.status === 'skipped' && outcome.exerciseOmissions?.some((item) => item.exerciseId === exercise.exerciseId && item.reason === 'voluntary')
-        && !outcome.prescriptionChanges?.some((change) => ['equipment', 'time', 'generated-substitution'].includes(change.source) && [...change.before, ...change.after].some((slot) => slot.exerciseId === exercise.exerciseId))) {
+        && !outcome.prescriptionChanges?.some((change) => ['equipment', 'time', 'generated-substitution', 'user-substitution'].includes(change.source) && [...change.before, ...change.after].some((slot) => slot.exerciseId === exercise.exerciseId))) {
         add(exercise.exerciseId, { kind: 'voluntary-skip', sourceId: outcome.sessionId, date: outcome.date, strength: 'explicit-choice' })
       }
       if (exercise.workingSets.length > 0 && ['improved', 'stable'].includes(exercise.performance)) {
